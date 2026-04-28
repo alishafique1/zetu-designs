@@ -1,10 +1,25 @@
 export type ExecMode = 'daemon' | 'api';
 
+// Which BYOK model endpoint to talk to in `mode === 'api'`. Each provider
+// has its own request shape — see src/providers/{anthropic,openai,azure,
+// google}.ts for the wire details. AWS Bedrock and Google Vertex are
+// reached via the `anthropic` provider pointed at an Anthropic-compatible
+// proxy (e.g. LiteLLM), which keeps signing on the server where the
+// long-lived AWS / GCP credentials belong.
+export type ModelProvider = 'anthropic' | 'openai' | 'azure' | 'google';
+
 export interface AppConfig {
   mode: ExecMode;
+  // Active provider when `mode === 'api'`. Older configs that predate the
+  // multi-provider rework default to 'anthropic' on load.
+  provider: ModelProvider;
   apiKey: string;
   baseUrl: string;
   model: string;
+  // Azure OpenAI only — the api-version query string the Azure REST
+  // surface requires (e.g. '2024-08-01-preview'). Ignored by every other
+  // provider so the same config can round-trip through localStorage.
+  apiVersion?: string;
   agentId: string | null;
   skillId: string | null;
   designSystemId: string | null;

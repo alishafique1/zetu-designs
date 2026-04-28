@@ -39,7 +39,7 @@ OD stands on four open-source shoulders:
 
 | | What you get |
 |---|---|
-| **Coding agents supported** | Claude Code · Codex CLI · Cursor Agent · Gemini CLI · OpenCode · Qwen Code · Anthropic API (BYOK fallback) |
+| **Coding agents supported** | Claude Code · Codex CLI · Cursor Agent · Gemini CLI · OpenCode · Qwen Code · Hosted-API BYOK fallback (Anthropic · OpenAI-compatible · Azure · Google Gemini, plus AWS Bedrock & GCP Vertex via proxy) |
 | **Design systems built-in** | **71** — 2 hand-authored starters + 69 product systems (Linear, Stripe, Vercel, Airbnb, Tesla, Notion, Anthropic, Apple, Cursor, Supabase, Figma, …) imported from [`awesome-design-md`][acd2] |
 | **Skills built-in** | **19** — prototype, deck, mobile, dashboard, pricing, docs, blog, SaaS landing, plus 10 document/work-product templates (PM spec, weekly update, OKRs, runbook, kanban, …) |
 | **Visual directions** | 5 curated schools (Editorial Monocle · Modern Minimal · Tech Utility · Brutalist · Soft Warm) — each ships a deterministic OKLch palette + font stack |
@@ -180,7 +180,7 @@ Adding a skill takes one folder. Read [`docs/skills-protocol.md`](docs/skills-pr
 
 ### 1 · We don't ship an agent. Yours is good enough.
 
-The daemon scans your `PATH` for [`claude`](https://docs.anthropic.com/en/docs/claude-code), [`codex`](https://github.com/openai/codex), [`cursor-agent`](https://www.cursor.com/cli), [`gemini`](https://github.com/google-gemini/gemini-cli), [`opencode`](https://opencode.ai/), and [`qwen`](https://github.com/QwenLM/qwen-code) on startup. Whichever it finds becomes the design engine — driven via stdio, with one adapter per CLI. Inspired by [`multica`](https://github.com/multica-ai/multica) and [`cc-switch`](https://github.com/farion1231/cc-switch). No CLI? `Anthropic API · BYOK` is the same pipeline minus the spawn.
+The daemon scans your `PATH` for [`claude`](https://docs.anthropic.com/en/docs/claude-code), [`codex`](https://github.com/openai/codex), [`cursor-agent`](https://www.cursor.com/cli), [`gemini`](https://github.com/google-gemini/gemini-cli), [`opencode`](https://opencode.ai/), and [`qwen`](https://github.com/QwenLM/qwen-code) on startup. Whichever it finds becomes the design engine — driven via stdio, with one adapter per CLI. Inspired by [`multica`](https://github.com/multica-ai/multica) and [`cc-switch`](https://github.com/farion1231/cc-switch). No CLI? The `Hosted API · BYOK` fallback streams directly from the browser to **Anthropic**, any **OpenAI-compatible** endpoint (OpenRouter / LiteLLM / DeepSeek / Groq / Together / Mistral …), **Azure OpenAI**, or **Google Gemini** — pick the provider in Settings, paste a key, go. AWS Bedrock and GCP Vertex Anthropic models work the same way through a server-side LiteLLM (or equivalent) proxy pointed at the `Anthropic` provider, since SigV4 / GCP JWT signing belongs on the server, not the browser.
 
 ### 2 · Skills are files, not plugins.
 
@@ -227,8 +227,10 @@ Every layer is composable. Every layer is a file you can edit. Read [`src/prompt
                │ /api/* (proxied in dev)           │ direct (BYOK)
                ▼                                   ▼
    ┌──────────────────────┐              ┌──────────────────────┐
-   │   Local daemon       │              │   Anthropic SDK      │
-   │   (Express + SQLite) │              │   (browser fallback) │
+   │   Local daemon       │              │  Hosted-API router   │
+   │   (Express + SQLite) │              │  Anthropic · OpenAI- │
+   │                      │              │  compatible · Azure  │
+   │                      │              │  · Google Gemini     │
    │                      │              └──────────────────────┘
    │   /api/agents        │
    │   /api/skills        │
@@ -268,7 +270,7 @@ The first load:
 
 1. Detects which agent CLIs you have on `PATH` and picks one automatically.
 2. Loads 19 skills + 71 design systems.
-3. Pops the welcome dialog so you can paste an Anthropic key (only needed for the BYOK fallback path).
+3. Pops the welcome dialog so you can pick a hosted-API provider — **Anthropic**, **OpenAI-compatible** (OpenRouter / LiteLLM / DeepSeek / Groq / Together / Mistral / OpenAI), **Azure OpenAI**, or **Google Gemini** — and paste the matching key (only needed for the BYOK fallback path; for AWS Bedrock or GCP Vertex Anthropic models, run a server-side LiteLLM proxy and point the `Anthropic` provider at it).
 4. **Auto-creates `./.od/`** — the local runtime folder for the SQLite project DB, per-project artifacts, and saved renders. There is no `od init` step; the daemon `mkdir`s everything it needs on boot.
 
 Type a prompt, hit **Send**, watch the question form arrive, fill it, watch the todo card stream, watch the artifact render. Click **Save to disk** or download as a project ZIP.
@@ -334,7 +336,12 @@ open-design/
 │   │   └── zip.ts                 ← project archive
 │   ├── providers/
 │   │   ├── daemon.ts              ← /api/chat SSE stream consumer
-│   │   ├── anthropic.ts           ← BYOK Anthropic SDK path
+│   │   ├── model.ts               ← BYOK provider router (anthropic / openai / azure / google)
+│   │   ├── anthropic.ts           ← Anthropic SDK path (also covers any Anthropic-compatible proxy)
+│   │   ├── openai.ts              ← OpenAI-compatible SSE (OpenRouter / LiteLLM / DeepSeek / Groq / Together)
+│   │   ├── azure.ts               ← Azure OpenAI deployment URLs + api-key header
+│   │   ├── google.ts              ← Google Generative Language streamGenerateContent
+│   │   ├── presets.ts             ← per-provider defaults shown in Settings
 │   │   └── registry.ts            ← /api/agents, /api/skills, /api/design-systems
 │   └── state/                     ← config + projects (localStorage + daemon-backed)
 │
@@ -499,9 +506,24 @@ Auto-detected from `PATH` on daemon boot. No config required.
 | [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | line-buffered | `gemini -p` |
 | [OpenCode](https://opencode.ai/) | `opencode` | line-buffered | `opencode run` |
 | [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen` | line-buffered | `qwen -p` |
-| Anthropic API · BYOK | n/a | SSE direct | Browser fallback when no CLI is on PATH |
+| Hosted API · BYOK | n/a | SSE direct | Browser fallback when no CLI is on PATH — pick any of the providers below |
 
 Adding a new CLI is one entry in [`daemon/agents.js`](daemon/agents.js). Streaming format is one of `claude-stream-json` (typed events) or `plain` (raw text).
+
+### Hosted-API providers (BYOK fallback)
+
+When no CLI is detected, OD streams directly from the browser to a hosted endpoint. Pick one in **Settings → Hosted API**, paste a key, optionally tweak the base URL.
+
+| Provider | Wire format | What it covers |
+|---|---|---|
+| **Anthropic** | `@anthropic-ai/sdk` | `api.anthropic.com`, plus any Anthropic-compatible proxy (LiteLLM, custom gateways, **AWS Bedrock** & **GCP Vertex** via a server-side proxy) |
+| **OpenAI-compatible** | `/chat/completions` SSE | OpenAI proper, [OpenRouter](https://openrouter.ai), [LiteLLM proxy](https://docs.litellm.ai/), [DeepSeek](https://platform.deepseek.com/), [Groq](https://groq.com/), [Together](https://together.ai/), [Mistral](https://mistral.ai/), and any other OpenAI-shaped endpoint |
+| **Azure OpenAI** | `/openai/deployments/<deployment>/chat/completions` SSE + `api-key` header | Azure-hosted OpenAI deployments. Base URL is the resource endpoint, Model is the deployment name, plus the Azure `api-version` |
+| **Google Gemini** | `:streamGenerateContent?alt=sse` | Google Generative Language API direct (Gemini family) |
+
+**On AWS Bedrock & GCP Vertex with Anthropic models:** Both require credential signing (SigV4 / GCP service-account JWT) which is unsafe to do from a browser with long-lived BYOK credentials. The recommended path is to run a server-side proxy ([LiteLLM](https://docs.litellm.ai/) works well — it speaks Anthropic-compatible *and* OpenAI-compatible) and point either the `Anthropic` or `OpenAI-compatible` provider at the proxy URL. The signing stays on the server where it belongs.
+
+Adding a fifth wire format is mechanical: a row in `ModelProvider`, an entry in [`src/providers/presets.ts`](src/providers/presets.ts), a `stream<X>` function alongside [`anthropic.ts` / `openai.ts` / `azure.ts` / `google.ts`](src/providers/), one more `case` in [`src/providers/model.ts`](src/providers/model.ts).
 
 ## References & lineage
 

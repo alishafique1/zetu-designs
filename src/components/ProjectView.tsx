@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createArtifactParser } from '../artifacts/parser';
 import { useT } from '../i18n';
-import { streamMessage } from '../providers/anthropic';
 import { streamViaDaemon } from '../providers/daemon';
+import { streamModel } from '../providers/model';
 import {
   fetchDesignSystem,
   fetchProjectFiles,
@@ -501,7 +501,7 @@ export function ProjectView({
         });
       } else {
         pushEvent({ kind: 'status', label: 'requesting', detail: config.model });
-        void streamMessage(config, systemPrompt, nextHistory, controller.signal, {
+        void streamModel(config, systemPrompt, nextHistory, controller.signal, {
           onDelta: (delta) => {
             handlers.onDelta(delta);
             handlers.onAgentEvent({ kind: 'text', text: delta });

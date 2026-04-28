@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n';
+import { providerLabel } from '../providers/presets';
 import { AgentIcon } from './AgentIcon';
 import { Icon } from './Icon';
 import type { AgentInfo, AppConfig, ExecMode } from '../types';
@@ -82,11 +83,11 @@ export function AvatarMenu({
             <span className="who">
               {config.mode === 'daemon'
                 ? t('avatar.localCli')
-                : t('avatar.anthropicApi')}
+                : providerLabel(config.provider)}
             </span>
             <span className="where">
               {config.mode === 'api'
-                ? safeHost(config.baseUrl)
+                ? `${config.model}${config.baseUrl ? ` · ${safeHost(config.baseUrl)}` : ''}`
                 : currentAgent
                   ? `${currentAgent.name}${currentAgent.version ? ` · ${currentAgent.version}` : ''}`
                   : t('avatar.noAgentSelected')}

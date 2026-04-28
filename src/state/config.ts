@@ -4,9 +4,11 @@ const STORAGE_KEY = 'open-design:config';
 
 export const DEFAULT_CONFIG: AppConfig = {
   mode: 'daemon',
+  provider: 'anthropic',
   apiKey: '',
   baseUrl: 'https://api.anthropic.com',
   model: 'claude-sonnet-4-5',
+  apiVersion: '',
   agentId: null,
   skillId: null,
   designSystemId: null,

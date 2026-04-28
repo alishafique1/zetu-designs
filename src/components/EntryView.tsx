@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n';
+import { providerLabel } from '../providers/presets';
 import type {
   AgentInfo,
   AppConfig,
@@ -82,16 +83,17 @@ export function EntryView({
 
   const envMetaLine = useMemo(() => {
     if (config.mode === 'api') {
+      const provider = providerLabel(config.provider);
       try {
-        return `${config.model} · ${new URL(config.baseUrl).host}`;
+        return `${provider} · ${config.model} · ${new URL(config.baseUrl).host}`;
       } catch {
-        return config.model;
+        return `${provider} · ${config.model}`;
       }
     }
     return currentAgent
       ? `${currentAgent.name}${currentAgent.version ? ` · ${currentAgent.version}` : ''}`
       : t('settings.noAgentSelected');
-  }, [config.mode, config.model, config.baseUrl, currentAgent, t]);
+  }, [config.mode, config.model, config.baseUrl, config.provider, currentAgent, t]);
 
   // 'Use this prompt' on an example card is a fast path — skip the form and
   // create the project immediately with sane defaults derived from the skill,

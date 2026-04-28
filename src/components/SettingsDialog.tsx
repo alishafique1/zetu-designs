@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { LOCALE_LABEL, LOCALES, useI18n } from '../i18n';
 import type { Locale } from '../i18n';
+import { PROVIDER_ORDER, PROVIDER_PRESETS } from '../providers/presets';
 import { AgentIcon } from './AgentIcon';
-import type { AgentInfo, AppConfig, ExecMode } from '../types';
+import type { AgentInfo, AppConfig, ExecMode, ModelProvider } from '../types';
 
 interface Props {
   initial: AppConfig;
@@ -13,12 +14,6 @@ interface Props {
   onClose: () => void;
   onRefreshAgents: () => void;
 }
-
-const SUGGESTED_MODELS = [
-  'claude-opus-4-5',
-  'claude-sonnet-4-5',
-  'claude-haiku-4-5',
-];
 
 export function SettingsDialog({
   initial,
@@ -48,10 +43,38 @@ export function SettingsDialog({
 
   const setMode = (mode: ExecMode) => setCfg((c) => ({ ...c, mode }));
 
+  // Switching providers swaps in that provider's defaults, but preserves
+  // any non-empty values the user already typed — they may have a custom
+  // baseUrl (e.g. an OpenRouter URL while staying on the openai provider)
+  // they don't want clobbered. Empty fields fall back to the preset.
+  const setProvider = (provider: ModelProvider) => {
+    setCfg((c) => {
+      if (c.provider === provider) return c;
+      const preset = PROVIDER_PRESETS[provider];
+      return {
+        ...c,
+        provider,
+        baseUrl: c.baseUrl?.trim() ? c.baseUrl : preset.baseUrl,
+        model: c.model?.trim() ? c.model : preset.defaultModel,
+      };
+    });
+  };
+
+  const activePreset = PROVIDER_PRESETS[cfg.provider];
+
   const canSave =
     cfg.mode === 'daemon'
       ? Boolean(cfg.agentId && agents.find((a) => a.id === cfg.agentId)?.available)
-      : Boolean(cfg.apiKey.trim() && cfg.model.trim() && cfg.baseUrl.trim());
+      : Boolean(
+          cfg.apiKey.trim() &&
+            cfg.model.trim() &&
+            // Azure has no global default base URL — require the user to
+            // paste their resource endpoint. Other providers ship a usable
+            // default so a blank field falls back to the preset.
+            (cfg.provider === 'azure'
+              ? cfg.baseUrl.trim().length > 0
+              : true),
+        );
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -187,14 +210,41 @@ export function SettingsDialog({
         ) : (
           <section className="settings-section">
             <div className="section-head">
-              <h3>{t('settings.apiSection')}</h3>
+              <div>
+                <h3>{t('settings.apiSection')}</h3>
+                <p className="hint">{t('settings.providerHint')}</p>
+              </div>
+            </div>
+            <div
+              className="seg-control"
+              role="tablist"
+              aria-label={t('settings.providerLabel')}
+            >
+              {PROVIDER_ORDER.map((id) => {
+                const preset = PROVIDER_PRESETS[id];
+                const active = cfg.provider === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    className={'seg-btn' + (active ? ' active' : '')}
+                    onClick={() => setProvider(id)}
+                    title={preset.blurb}
+                  >
+                    <span className="seg-title">{preset.label}</span>
+                    <span className="seg-meta">{preset.blurb}</span>
+                  </button>
+                );
+              })}
             </div>
             <label className="field">
               <span className="field-label">{t('settings.apiKey')}</span>
               <div className="field-row">
                 <input
                   type={showApiKey ? 'text' : 'password'}
-                  placeholder="sk-ant-..."
+                  placeholder={activePreset.apiKeyPlaceholder}
                   value={cfg.apiKey}
                   onChange={(e) => setCfg({ ...cfg, apiKey: e.target.value })}
                   autoFocus
@@ -217,10 +267,11 @@ export function SettingsDialog({
                 type="text"
                 value={cfg.model}
                 list="suggested-models"
+                placeholder={activePreset.defaultModel}
                 onChange={(e) => setCfg({ ...cfg, model: e.target.value })}
               />
               <datalist id="suggested-models">
-                {SUGGESTED_MODELS.map((m) => (
+                {activePreset.modelSuggestions.map((m) => (
                   <option value={m} key={m} />
                 ))}
               </datalist>
@@ -230,10 +281,26 @@ export function SettingsDialog({
               <input
                 type="text"
                 value={cfg.baseUrl}
+                placeholder={activePreset.baseUrl || 'https://...'}
                 onChange={(e) => setCfg({ ...cfg, baseUrl: e.target.value })}
               />
             </label>
+            {activePreset.needsApiVersion ? (
+              <label className="field">
+                <span className="field-label">{t('settings.apiVersion')}</span>
+                <input
+                  type="text"
+                  value={cfg.apiVersion ?? ''}
+                  placeholder="2024-08-01-preview"
+                  onChange={(e) =>
+                    setCfg({ ...cfg, apiVersion: e.target.value })
+                  }
+                />
+                <span className="hint">{t('settings.apiVersionHint')}</span>
+              </label>
+            ) : null}
             <p className="hint">{t('settings.apiHint')}</p>
+            <p className="hint">{t('settings.proxyHint')}</p>
           </section>
         )}
 
