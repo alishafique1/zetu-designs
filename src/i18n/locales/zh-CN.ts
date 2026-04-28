@@ -84,7 +84,11 @@ export const zhCN: Dict = {
   'settings.languageHint': '切换界面语言，设置仅保存在当前浏览器。',
   'settings.modelPicker': '模型',
   'settings.reasoningPicker': '推理强度',
-  'settings.modelPickerHint': '按 CLI 单独保存。选择「默认」则沿用 CLI 自身的配置。',
+  'settings.modelPickerHint':
+    '当 CLI 提供 `models` 命令时会自动拉取。选择「默认」则沿用 CLI 自身的配置；选择「自定义」可手动输入任何 CLI 支持的模型 id。',
+  'settings.modelCustom': '自定义（在下方填写）…',
+  'settings.modelCustomLabel': '自定义模型 id',
+  'settings.modelCustomPlaceholder': '例如 anthropic/claude-sonnet-4-6',
 
   'entry.tabDesigns': '我的设计',
   'entry.tabExamples': '示例',
@@ -214,6 +218,7 @@ export const zhCN: Dict = {
   'avatar.modelSection': '模型',
   'avatar.modelLabel': '模型',
   'avatar.reasoningLabel': '推理',
+  'avatar.customSuffix': '（自定义）',
 
   'project.backToProjects': '返回项目列表',
   'project.metaFreeform': '自由设计',

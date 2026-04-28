@@ -2,6 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { LOCALE_LABEL, LOCALES, useI18n } from '../i18n';
 import type { Locale } from '../i18n';
 import { AgentIcon } from './AgentIcon';
+import {
+  CUSTOM_MODEL_SENTINEL,
+  isCustomModel,
+  renderModelOptions,
+} from './modelOptions';
 import type { AgentInfo, AppConfig, ExecMode } from '../types';
 
 interface Props {
@@ -214,6 +219,11 @@ export function SettingsDialog({
               const reasoningValue =
                 choice.reasoning ??
                 selected.reasoningOptions?.[0]?.id ?? '';
+              const customActive =
+                hasModels && isCustomModel(modelValue, selected.models!);
+              const selectValue = customActive
+                ? CUSTOM_MODEL_SENTINEL
+                : modelValue;
               return (
                 <div className="agent-model-row">
                   {hasModels ? (
@@ -222,15 +232,39 @@ export function SettingsDialog({
                         {t('settings.modelPicker')}
                       </span>
                       <select
-                        value={modelValue}
-                        onChange={(e) => setChoice({ model: e.target.value })}
+                        value={selectValue}
+                        onChange={(e) => {
+                          if (e.target.value === CUSTOM_MODEL_SENTINEL) {
+                            // Switching to "Custom…" should clear the
+                            // value so the input below opens empty for
+                            // typing — keeping the previous live id
+                            // would defeat the point.
+                            setChoice({ model: '' });
+                          } else {
+                            setChoice({ model: e.target.value });
+                          }
+                        }}
                       >
-                        {selected.models!.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.label}
-                          </option>
-                        ))}
+                        {renderModelOptions(selected.models!)}
+                        <option value={CUSTOM_MODEL_SENTINEL}>
+                          {t('settings.modelCustom')}
+                        </option>
                       </select>
+                    </label>
+                  ) : null}
+                  {customActive ? (
+                    <label className="field">
+                      <span className="field-label">
+                        {t('settings.modelCustomLabel')}
+                      </span>
+                      <input
+                        type="text"
+                        value={modelValue}
+                        placeholder={t('settings.modelCustomPlaceholder')}
+                        onChange={(e) =>
+                          setChoice({ model: e.target.value.trim() })
+                        }
+                      />
                     </label>
                   ) : null}
                   {hasReasoning ? (

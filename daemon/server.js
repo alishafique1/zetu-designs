@@ -6,7 +6,12 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
-import { detectAgents, getAgentDef } from './agents.js';
+import {
+  detectAgents,
+  getAgentDef,
+  isKnownModel,
+  sanitizeCustomModel,
+} from './agents.js';
 import { listSkills } from './skills.js';
 import { listDesignSystems, readDesignSystem } from './design-systems.js';
 import { createClaudeStreamHandler } from './claude-stream.js';
@@ -782,11 +787,15 @@ export async function startServer({ port = 7456 } = {}) {
       (d) => fs.existsSync(d),
     );
     // Per-agent model + reasoning the user picked in the model menu.
-    // Validated against the agent's declared options so a stale or hostile
-    // value can't smuggle arbitrary flags into the spawned argv.
+    // Trust the value when it matches the most recent /api/agents listing
+    // (live or fallback). Otherwise allow it through if it passes a
+    // permissive sanitizer — that's the path for user-typed custom model
+    // ids the CLI's listing didn't surface yet.
     const safeModel =
-      typeof model === 'string' && Array.isArray(def.models)
-        ? def.models.find((m) => m.id === model)?.id ?? null
+      typeof model === 'string'
+        ? isKnownModel(def, model)
+          ? model
+          : sanitizeCustomModel(model)
         : null;
     const safeReasoning =
       typeof reasoning === 'string' && Array.isArray(def.reasoningOptions)

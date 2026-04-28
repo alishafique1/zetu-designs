@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useT } from '../i18n';
 import { AgentIcon } from './AgentIcon';
 import { Icon } from './Icon';
+import { renderModelOptions } from './modelOptions';
 import type { AgentInfo, AppConfig, ExecMode } from '../types';
 
 interface Props {
@@ -197,11 +198,20 @@ export function AvatarMenu({
                           })
                         }
                       >
-                        {currentAgent.models.map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.label}
+                        {renderModelOptions(currentAgent.models)}
+                        {/* When the user has typed a custom id in
+                            Settings, surface it here too so the dropdown
+                            actually shows the active selection rather
+                            than collapsing to "Default". */}
+                        {currentModelId &&
+                        !currentAgent.models.some(
+                          (m) => m.id === currentModelId,
+                        ) ? (
+                          <option value={currentModelId}>
+                            {currentModelId}{' '}
+                            {t('avatar.customSuffix')}
                           </option>
-                        ))}
+                        ) : null}
                       </select>
                     </label>
                   ) : null}
