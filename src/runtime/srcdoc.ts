@@ -16,10 +16,10 @@
  */
 export function buildSrcdoc(
   html: string,
-  options: { deck?: boolean } = {},
+  options: { deck?: boolean } = {}
 ): string {
   const head = html.trimStart().slice(0, 64).toLowerCase();
-  const isFullDoc = head.startsWith('<!doctype') || head.startsWith('<html');
+  const isFullDoc = head.startsWith("<!doctype") || head.startsWith("<html");
   const wrapped = isFullDoc
     ? html
     : `<!doctype html>
@@ -68,8 +68,10 @@ function injectSandboxShim(doc: string): string {
   tryShim('localStorage');
   tryShim('sessionStorage');
 })();</script>`;
-  if (/<head[^>]*>/i.test(doc)) return doc.replace(/<head[^>]*>/i, (m) => `${m}${shim}`);
-  if (/<body[^>]*>/i.test(doc)) return doc.replace(/<body[^>]*>/i, (m) => `${m}${shim}`);
+  if (/<head[^>]*>/i.test(doc))
+    return doc.replace(/<head[^>]*>/i, (m) => `${m}${shim}`);
+  if (/<body[^>]*>/i.test(doc))
+    return doc.replace(/<body[^>]*>/i, (m) => `${m}${shim}`);
   return shim + doc;
 }
 
@@ -101,10 +103,10 @@ function injectDeckBridge(doc: string): string {
 .stage, .deck-stage, .deck-shell { place-content: center !important; }
 </style>`;
   const docWithStyle = /<\/head>/i.test(doc)
-    ? doc.replace(/<\/head>/i, styleFix + '</head>')
+    ? doc.replace(/<\/head>/i, styleFix + "</head>")
     : /<head[^>]*>/i.test(doc)
-      ? doc.replace(/<head[^>]*>/i, (m) => m + styleFix)
-      : styleFix + doc;
+    ? doc.replace(/<head[^>]*>/i, (m) => m + styleFix)
+    : styleFix + doc;
   doc = docWithStyle;
   const script = `<script>(function(){
   function slides(){ return document.querySelectorAll('.slide'); }
@@ -265,6 +267,7 @@ function injectDeckBridge(doc: string): string {
   }
   observeSlides();
 })();</script>`;
-  if (/<\/body>/i.test(doc)) return doc.replace(/<\/body>/i, `${script}</body>`);
+  if (/<\/body>/i.test(doc))
+    return doc.replace(/<\/body>/i, `${script}</body>`);
   return doc + script;
 }

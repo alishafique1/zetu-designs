@@ -2,9 +2,9 @@
 // front-matter, returns listing. No watching in this MVP — re-scans on every
 // GET /api/skills, which is fine for dozens of skills.
 
-import { readdir, readFile, stat } from 'node:fs/promises';
-import path from 'node:path';
-import { parseFrontmatter } from './frontmatter.js';
+import { readdir, readFile, stat } from "node:fs/promises";
+import path from "node:path";
+import { parseFrontmatter } from "./frontmatter.js";
 
 export async function listSkills(skillsRoot) {
   const out = [];
@@ -17,26 +17,32 @@ export async function listSkills(skillsRoot) {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const dir = path.join(skillsRoot, entry.name);
-    const skillPath = path.join(dir, 'SKILL.md');
+    const skillPath = path.join(dir, "SKILL.md");
     try {
       const stats = await stat(skillPath);
       if (!stats.isFile()) continue;
-      const raw = await readFile(skillPath, 'utf8');
+      const raw = await readFile(skillPath, "utf8");
       const { data, body } = parseFrontmatter(raw);
       const hasAttachments = await dirHasAttachments(dir);
       const mode = data.od?.mode || inferMode(body, data.description);
       out.push({
         id: data.name || entry.name,
         name: data.name || entry.name,
-        description: data.description || '',
+        description: data.description || "",
         triggers: Array.isArray(data.triggers) ? data.triggers : [],
         mode,
-        platform: normalizePlatform(data.od?.platform, mode, body, data.description),
+        platform: normalizePlatform(
+          data.od?.platform,
+          mode,
+          body,
+          data.description
+        ),
         scenario: normalizeScenario(data.od?.scenario, body, data.description),
-        previewType: data.od?.preview?.type || 'html',
+        previewType: data.od?.preview?.type || "html",
         designSystemRequired: data.od?.design_system?.requires ?? true,
         defaultFor: normalizeDefaultFor(data.od?.default_for),
-        upstream: typeof data.od?.upstream === 'string' ? data.od.upstream : null,
+        upstream:
+          typeof data.od?.upstream === "string" ? data.od.upstream : null,
         featured: normalizeFeatured(data.od?.featured),
         // Optional metadata hints used by 'Use this prompt' fast-create so
         // the resulting project mirrors the shipped example.html. Each hint
@@ -63,15 +69,15 @@ export async function listSkills(skillsRoot) {
 // open those files via absolute paths.
 function withSkillRootPreamble(body, dir) {
   const preamble = [
-    '> **Skill root (absolute):** `' + dir + '`',
-    '>',
-    '> This skill ships side files alongside `SKILL.md`. When the workflow',
-    '> below references relative paths such as `assets/template.html` or',
-    '> `references/layouts.md`, resolve them against the skill root above and',
-    '> open them via their full absolute path.',
-    '',
-    '',
-  ].join('\n');
+    "> **Skill root (absolute):** `" + dir + "`",
+    ">",
+    "> This skill ships side files alongside `SKILL.md`. When the workflow",
+    "> below references relative paths such as `assets/template.html` or",
+    "> `references/layouts.md`, resolve them against the skill root above and",
+    "> open them via their full absolute path.",
+    "",
+    "",
+  ].join("\n");
   return preamble + body;
 }
 
@@ -79,7 +85,9 @@ async function dirHasAttachments(dir) {
   try {
     const entries = await readdir(dir, { withFileTypes: true });
     return entries.some(
-      (e) => e.name !== 'SKILL.md' && (e.isDirectory() || /\.(md|html|css|js|json|txt)$/i.test(e.name)),
+      (e) =>
+        e.name !== "SKILL.md" &&
+        (e.isDirectory() || /\.(md|html|css|js|json|txt)$/i.test(e.name))
     );
   } catch {
     return false;
@@ -96,7 +104,7 @@ function normalizeDefaultFor(value) {
 // 'high-fidelity' are meaningful — anything else collapses to null so the
 // caller falls back to the form default ('high-fidelity').
 function normalizeFidelity(value) {
-  if (value === 'wireframe' || value === 'high-fidelity') return value;
+  if (value === "wireframe" || value === "high-fidelity") return value;
   return null;
 }
 
@@ -104,11 +112,11 @@ function normalizeFidelity(value) {
 // to a real boolean. Returns null for anything we can't interpret so the
 // caller knows to fall back to the form default.
 function normalizeBoolHint(value) {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'string') {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") {
     const v = value.trim().toLowerCase();
-    if (v === 'true' || v === 'yes' || v === '1') return true;
-    if (v === 'false' || v === 'no' || v === '0') return false;
+    if (v === "true" || v === "yes" || v === "1") return true;
+    if (v === "false" || v === "no" || v === "0") return false;
   }
   return null;
 }
@@ -119,8 +127,8 @@ function normalizeBoolHint(value) {
 // natural alphabetical order.
 function normalizeFeatured(value) {
   if (value === true) return 1;
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim()) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
     const n = Number(value);
     if (Number.isFinite(n)) return n;
   }
@@ -133,66 +141,70 @@ function normalizeFeatured(value) {
 // serves as a passable starter prompt.
 function derivePrompt(data) {
   const explicit = data.od?.example_prompt;
-  if (typeof explicit === 'string' && explicit.trim()) return explicit.trim();
-  const desc = typeof data.description === 'string' ? data.description.trim() : '';
-  if (!desc) return '';
-  const collapsed = desc.replace(/\s+/g, ' ').trim();
+  if (typeof explicit === "string" && explicit.trim()) return explicit.trim();
+  const desc =
+    typeof data.description === "string" ? data.description.trim() : "";
+  if (!desc) return "";
+  const collapsed = desc.replace(/\s+/g, " ").trim();
   const firstSentence = collapsed.match(/^.+?[.!?。！？](?:\s|$)/)?.[0]?.trim();
   return (firstSentence || collapsed).slice(0, 320);
 }
 
 function inferMode(body, description) {
-  const hay = `${description ?? ''}\n${body ?? ''}`.toLowerCase();
-  if (/\bppt|deck|slide|presentation|幻灯|投影/.test(hay)) return 'deck';
-  if (/\bdesign[- ]system|\bdesign\.md|\bdesign tokens/.test(hay)) return 'design-system';
-  if (/\btemplate\b/.test(hay)) return 'template';
-  return 'prototype';
+  const hay = `${description ?? ""}\n${body ?? ""}`.toLowerCase();
+  if (/\bppt|deck|slide|presentation|幻灯|投影/.test(hay)) return "deck";
+  if (/\bdesign[- ]system|\bdesign\.md|\bdesign tokens/.test(hay))
+    return "design-system";
+  if (/\btemplate\b/.test(hay)) return "template";
+  return "prototype";
 }
 
 // Validate platform tag — only desktop / mobile are meaningful for the
 // Examples gallery. Falls back to autodetecting "mobile" from descriptions
 // so legacy skills sort under the right pill without authoring changes.
 function normalizePlatform(value, mode, body, description) {
-  if (value === 'desktop' || value === 'mobile') return value;
-  if (mode !== 'prototype') return null;
-  const hay = `${description ?? ''}\n${body ?? ''}`.toLowerCase();
-  if (/mobile|phone|ios|android|手机|移动端/.test(hay)) return 'mobile';
-  return 'desktop';
+  if (value === "desktop" || value === "mobile") return value;
+  if (mode !== "prototype") return null;
+  const hay = `${description ?? ""}\n${body ?? ""}`.toLowerCase();
+  if (/mobile|phone|ios|android|手机|移动端/.test(hay)) return "mobile";
+  return "desktop";
 }
 
 // Normalise a scenario tag to a small fixed vocabulary so the filter pills
 // stay tidy. Unknown values pass through verbatim so authors can experiment;
 // missing values default to "general".
 const KNOWN_SCENARIOS = new Set([
-  'general',
-  'engineering',
-  'product',
-  'design',
-  'marketing',
-  'sales',
-  'finance',
-  'hr',
-  'operations',
-  'support',
-  'legal',
-  'education',
-  'personal',
+  "general",
+  "engineering",
+  "product",
+  "design",
+  "marketing",
+  "sales",
+  "finance",
+  "hr",
+  "operations",
+  "support",
+  "legal",
+  "education",
+  "personal",
 ]);
 function normalizeScenario(value, body, description) {
-  if (typeof value === 'string') {
+  if (typeof value === "string") {
     const v = value.trim().toLowerCase();
     if (v) return v;
   }
-  const hay = `${description ?? ''}\n${body ?? ''}`.toLowerCase();
-  if (/finance|invoice|expense|budget|p&l|revenue/.test(hay)) return 'finance';
-  if (/\bhr\b|onboarding|payroll|employee|人事/.test(hay)) return 'hr';
-  if (/marketing|campaign|brand|landing/.test(hay)) return 'marketing';
-  if (/runbook|incident|deploy|engineering|sre|api/.test(hay)) return 'engineering';
-  if (/spec|prd|roadmap|product manager|product team/.test(hay)) return 'product';
-  if (/design system|moodboard|mockup|ui kit/.test(hay)) return 'design';
-  if (/sales|quote|proposal|lead/.test(hay)) return 'sales';
-  if (/operations|ops|logistics|inventory/.test(hay)) return 'operations';
-  return 'general';
+  const hay = `${description ?? ""}\n${body ?? ""}`.toLowerCase();
+  if (/finance|invoice|expense|budget|p&l|revenue/.test(hay)) return "finance";
+  if (/\bhr\b|onboarding|payroll|employee|人事/.test(hay)) return "hr";
+  if (/marketing|campaign|brand|landing/.test(hay)) return "marketing";
+  if (/runbook|incident|deploy|engineering|sre|api/.test(hay))
+    return "engineering";
+  if (/spec|prd|roadmap|product manager|product team/.test(hay))
+    return "product";
+  if (/design system|moodboard|mockup|ui kit/.test(hay)) return "design";
+  if (/sales|quote|proposal|lead/.test(hay)) return "sales";
+  if (/operations|ops|logistics|inventory/.test(hay)) return "operations";
+  return "general";
 }
 // Surface the vocabulary so callers (frontend filter UI) could mirror it
 // later if they want to. Not exported today, kept here for documentation.
