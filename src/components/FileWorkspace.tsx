@@ -3,7 +3,7 @@ import { useT } from '../i18n';
 import {
   deleteProjectFile,
   fetchProjectFileText,
-  uploadProjectFile,
+  uploadProjectFiles,
   writeProjectTextFile,
 } from '../providers/registry';
 import type { OpenTabsState, ProjectFile } from '../types';
@@ -57,6 +57,7 @@ export function FileWorkspace({
   );
 
   const [showPasteDialog, setShowPasteDialog] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [sketches, setSketches] = useState<Record<string, SketchState>>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -142,15 +143,58 @@ export function FileWorkspace({
   }
 
   async function handleFilePicked(ev: React.ChangeEvent<HTMLInputElement>) {
-    const f = ev.target.files?.[0];
-    if (!f) return;
-    const result = await uploadProjectFile(projectId, f);
+    const picked = Array.from(ev.target.files ?? []);
     ev.target.value = '';
-    if (result) {
+    await uploadFiles(picked);
+  }
+
+  async function uploadFiles(picked: File[]) {
+    if (picked.length === 0) return;
+
+    setUploadError(null);
+    const result = await uploadProjectFiles(projectId, picked);
+    if (result.uploaded.length > 0) {
       await onRefreshFiles();
-      openFile(result.name);
+      const lastUploaded = result.uploaded[result.uploaded.length - 1];
+      if (lastUploaded?.path) openFile(lastUploaded.path);
+    }
+
+    if (result.failed.length > 0) {
+      const failedCount = result.failed.length;
+      const uploadedCount = result.uploaded.length;
+      const detail = result.error ? ` (${result.error})` : '';
+      setUploadError(
+        uploadedCount > 0
+          ? `Uploaded ${uploadedCount} file(s), but ${failedCount} failed${detail}.`
+          : `Upload failed for ${failedCount} file(s)${detail}.`,
+      );
+      console.warn('Project upload had failures', result.failed);
     }
   }
+
+  useEffect(() => {
+    const hasFiles = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes('Files');
+    const isAllowedDropTarget = (target: EventTarget | null) => {
+      if (!(target instanceof Element)) return false;
+      return Boolean(target.closest('.df-drop, .composer'));
+    };
+    const onDragOver = (e: DragEvent) => {
+      if (!hasFiles(e) || isAllowedDropTarget(e.target)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+    };
+    const onDrop = (e: DragEvent) => {
+      if (!hasFiles(e) || isAllowedDropTarget(e.target)) return;
+      e.preventDefault();
+    };
+    window.addEventListener('dragover', onDragOver);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onDragOver);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, []);
 
   async function handleDelete(name: string) {
     if (!confirm(t('workspace.deleteFileConfirm', { name }))) return;
@@ -276,10 +320,13 @@ export function FileWorkspace({
 
   return (
     <div className="workspace">
-      <div className="ws-tabs-bar">
+      <div className="ws-tabs-bar" role="tablist" aria-label={t('workspace.designFiles')}>
         <button
           type="button"
           className={`ws-tab design-files-tab ${activeTab === DESIGN_FILES_TAB ? 'active' : ''}`}
+          role="tab"
+          aria-selected={activeTab === DESIGN_FILES_TAB}
+          tabIndex={0}
           onClick={() => setActiveTab(DESIGN_FILES_TAB)}
           title={t('workspace.designFiles')}
         >
@@ -310,6 +357,7 @@ export function FileWorkspace({
         })}
       </div>
       <div className="ws-body">
+        {uploadError ? <div className="viewer-empty">{uploadError}</div> : null}
         {activeTab === DESIGN_FILES_TAB ? (
           <DesignFilesPanel
             projectId={projectId}
@@ -318,6 +366,7 @@ export function FileWorkspace({
             onOpenFile={openFile}
             onDeleteFile={(name) => void handleDelete(name)}
             onUpload={() => fileInputRef.current?.click()}
+            onUploadFiles={(picked) => void uploadFiles(picked)}
             onPaste={() => setShowPasteDialog(true)}
             onNewSketch={startNewSketch}
           />
@@ -363,7 +412,7 @@ export function FileWorkspace({
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*"
+        multiple
         style={{ display: 'none' }}
         onChange={handleFilePicked}
       />
@@ -402,12 +451,18 @@ function Tab({
   const t = useT();
   const iconName = kindIconName(kind);
   return (
-    <button
-      type="button"
+    <div
       className={`ws-tab ${active ? 'active' : ''}`}
       onClick={onActivate}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onActivate();
+        }
+      }}
       role="tab"
       aria-selected={active}
+      tabIndex={0}
     >
       {iconName ? (
         <span className="tab-icon" aria-hidden>
@@ -428,7 +483,7 @@ function Tab({
           <Icon name="close" size={11} />
         </button>
       ) : null}
-    </button>
+    </div>
   );
 }
 
