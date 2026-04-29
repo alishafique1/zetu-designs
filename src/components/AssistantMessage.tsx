@@ -6,6 +6,7 @@ import { splitOnQuestionForms, type QuestionForm } from '../artifacts/question-f
 import { QuestionFormView, parseSubmittedAnswers } from './QuestionForm';
 import { Icon } from './Icon';
 import { useT } from '../i18n';
+import { unfinishedTodosFromEvents, type TodoItem } from '../runtime/todos';
 import type { Dict } from '../i18n/types';
 import type { AgentEvent, ChatMessage, ProjectFile } from '../types';
 
@@ -26,6 +27,7 @@ interface Props {
   // Submit handler the form fires when the user picks answers — opaque
   // to AssistantMessage; ProjectView wires it into onSend.
   onSubmitForm?: (text: string) => void;
+  onContinueRemainingTasks?: (todos: TodoItem[]) => void;
 }
 
 /**
@@ -46,6 +48,7 @@ export function AssistantMessage({
   isLast,
   nextUserContent,
   onSubmitForm,
+  onContinueRemainingTasks,
 }: Props) {
   const t = useT();
   const events = message.events ?? [];
@@ -54,6 +57,9 @@ export function AssistantMessage({
     | Extract<AgentEvent, { kind: 'usage' }>
     | undefined;
   const produced = message.producedFiles ?? [];
+  const unfinishedTodos = streaming ? [] : unfinishedTodosFromEvents(events);
+  const canContinueTodos =
+    !streaming && !!isLast && unfinishedTodos.length > 0 && !!onContinueRemainingTasks;
   // Track which forms the user submitted in this session so we lock them
   // immediately on click (without waiting for the parent to re-render).
   const [locallySubmitted, setLocallySubmitted] = useState<Set<string>>(() => new Set());
@@ -106,11 +112,19 @@ export function AssistantMessage({
             onRequestOpenFile={onRequestOpenFile}
           />
         ) : null}
+        {!streaming && unfinishedTodos.length > 0 ? (
+          <UnfinishedTodosPanel
+            todos={unfinishedTodos}
+            canContinue={canContinueTodos}
+            onContinue={() => onContinueRemainingTasks?.(unfinishedTodos)}
+          />
+        ) : null}
         <AssistantFooter
           streaming={streaming}
           startedAt={message.startedAt}
           endedAt={message.endedAt}
           usage={usage}
+          hasUnfinishedTodos={unfinishedTodos.length > 0}
         />
       </div>
     </div>
@@ -122,20 +136,26 @@ function AssistantFooter({
   startedAt,
   endedAt,
   usage,
+  hasUnfinishedTodos,
 }: {
   streaming: boolean;
   startedAt: number | undefined;
   endedAt: number | undefined;
   usage: Extract<AgentEvent, { kind: 'usage' }> | undefined;
+  hasUnfinishedTodos: boolean;
 }) {
   const t = useT();
   const elapsed = useLiveElapsed(streaming, startedAt, endedAt);
-  if (!streaming && !elapsed && !usage) return null;
+  if (!streaming && !elapsed && !usage && !hasUnfinishedTodos) return null;
   return (
-    <div className="assistant-footer">
+    <div className="assistant-footer" data-unfinished={hasUnfinishedTodos ? 'true' : 'false'}>
       <span className="dot" data-active={streaming ? 'true' : 'false'} />
       <span className="assistant-label">
-        {streaming ? t('assistant.workingLabel') : t('assistant.doneLabel')}
+        {streaming
+          ? t('assistant.workingLabel')
+          : hasUnfinishedTodos
+            ? t('assistant.unfinishedLabel')
+            : t('assistant.doneLabel')}
       </span>
       <span className="assistant-stats">
         {elapsed}
@@ -146,6 +166,46 @@ function AssistantFooter({
           ? ` · $${usage.costUsd.toFixed(4)}`
           : ''}
       </span>
+    </div>
+  );
+}
+
+function UnfinishedTodosPanel({
+  todos,
+  canContinue,
+  onContinue,
+}: {
+  todos: TodoItem[];
+  canContinue: boolean;
+  onContinue: () => void;
+}) {
+  const t = useT();
+  const visible = todos.slice(0, 3);
+  const hiddenCount = todos.length - visible.length;
+  return (
+    <div className="unfinished-todos">
+      <div className="unfinished-todos-head">
+        <span className="unfinished-todos-title">
+          {t('assistant.unfinishedSummary', { n: todos.length })}
+        </span>
+        {canContinue ? (
+          <button type="button" className="unfinished-todos-continue" onClick={onContinue}>
+            {t('assistant.continueRemaining')}
+          </button>
+        ) : null}
+      </div>
+      <ul className="unfinished-todos-list">
+        {visible.map((todo, i) => (
+          <li key={`${todo.status}-${todo.content}-${i}`}>
+            {todo.status === 'in_progress' && todo.activeForm ? todo.activeForm : todo.content}
+          </li>
+        ))}
+      </ul>
+      {hiddenCount > 0 ? (
+        <div className="unfinished-todos-more">
+          {t('assistant.unfinishedMore', { n: hiddenCount })}
+        </div>
+      ) : null}
     </div>
   );
 }

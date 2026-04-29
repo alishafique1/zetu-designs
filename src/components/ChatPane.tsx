@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useT } from '../i18n';
 import type { Dict } from '../i18n/types';
 import { projectRawUrl } from '../providers/registry';
+import type { TodoItem } from '../runtime/todos';
 import type { ChatAttachment, ChatMessage, Conversation, ProjectFile } from '../types';
 import { AssistantMessage } from './AssistantMessage';
 import { ChatComposer, type ChatComposerHandle } from './ChatComposer';
@@ -60,6 +61,7 @@ interface Props {
   // Question-form submissions become a normal user message; the parent
   // routes that text through onSend (no attachments).
   onSubmitForm?: (text: string) => void;
+  onContinueRemainingTasks?: (assistantMessage: ChatMessage, todos: TodoItem[]) => void;
   // Header "+" button — kicks off ProjectView's create-conversation flow.
   onNewConversation?: () => void;
   // Conversation list that used to live in the topbar. The chat tab now
@@ -90,6 +92,7 @@ export function ChatPane({
   onRequestOpenFile,
   initialDraft,
   onSubmitForm,
+  onContinueRemainingTasks,
   onNewConversation,
   conversations,
   activeConversationId,
@@ -349,6 +352,11 @@ export function ChatPane({
                     isLast={m.id === lastAssistantId}
                     nextUserContent={nextUserContentByAssistantId.get(m.id)}
                     onSubmitForm={onSubmitForm}
+                    onContinueRemainingTasks={
+                      m.id === lastAssistantId && onContinueRemainingTasks
+                        ? (todos) => onContinueRemainingTasks(m, todos)
+                        : undefined
+                    }
                   />
                 ),
               )}

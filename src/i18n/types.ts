@@ -473,6 +473,10 @@ export interface Dict {
   'assistant.role': string;
   'assistant.workingLabel': string;
   'assistant.doneLabel': string;
+  'assistant.unfinishedLabel': string;
+  'assistant.unfinishedSummary': string;
+  'assistant.unfinishedMore': string;
+  'assistant.continueRemaining': string;
   'assistant.outTokens': string;
   'assistant.producedFiles': string;
   'assistant.openFile': string;

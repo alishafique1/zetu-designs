@@ -12,6 +12,7 @@ import {
 } from '../providers/registry';
 import { composeSystemPrompt } from '../prompts/system';
 import { navigate } from '../router';
+import type { TodoItem } from '../runtime/todos';
 import {
   createConversation,
   deleteConversation as deleteConversationApi,
@@ -577,6 +578,27 @@ export function ProjectView({
     [project.id, projectFiles, requestOpenFile],
   );
 
+  const handleContinueRemainingTasks = useCallback(
+    (_assistantMessage: ChatMessage, todos: TodoItem[]) => {
+      if (streaming || todos.length === 0) return;
+      const remainingList = todos
+        .map((todo, i) => {
+          const label =
+            todo.status === 'in_progress' && todo.activeForm ? todo.activeForm : todo.content;
+          return `${i + 1}. [${todo.status}] ${label}`;
+        })
+        .join('\n');
+      const prompt =
+        'Continue the remaining unfinished tasks from the previous run. ' +
+        'Do not redo completed work. Focus only on these unfinished todos:\n\n' +
+        `${remainingList}\n\n` +
+        'Before making changes, inspect the current project files as needed. ' +
+        'Update TodoWrite as you complete each remaining task.';
+      void handleSend(prompt, []);
+    },
+    [streaming, handleSend],
+  );
+
   const handleExportAsPptx = useCallback(
     (fileName: string) => {
       if (streaming) return;
@@ -776,6 +798,7 @@ export function ProjectView({
             if (streaming) return;
             void handleSend(text, []);
           }}
+          onContinueRemainingTasks={handleContinueRemainingTasks}
           onNewConversation={handleNewConversation}
           conversations={conversations}
           activeConversationId={activeConversationId}
