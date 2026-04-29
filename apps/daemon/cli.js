@@ -23,14 +23,19 @@ Starts a local daemon that:
   }
 }
 
-startServer({ port }).then(url => {
-  console.log(`[od] listening on ${url}`);
-  if (open) {
-    const opener = process.platform === 'darwin' ? 'open'
-      : process.platform === 'win32' ? 'start'
-      : 'xdg-open';
-    import('node:child_process').then(({ spawn }) => {
-      spawn(opener, [url], { detached: true, stdio: 'ignore' }).unref();
-    });
-  }
-});
+startServer({ port })
+  .then(url => {
+    console.log(`[od] listening on ${url}`);
+    if (open) {
+      const opener = process.platform === 'darwin' ? 'open'
+        : process.platform === 'win32' ? 'start'
+        : 'xdg-open';
+      import('node:child_process').then(({ spawn }) => {
+        spawn(opener, [url], { detached: true, stdio: 'ignore' }).unref();
+      });
+    }
+  })
+  .catch((err) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });

@@ -880,8 +880,12 @@ export async function startServer({ port = 7456 } = {}) {
     });
   }
 
-  return new Promise((resolve) => {
-    app.listen(port, '127.0.0.1', () => resolve(`http://localhost:${port}`));
+  return new Promise((resolve, reject) => {
+    const server = app.listen(port, '127.0.0.1', () => {
+      server.off('error', reject);
+      resolve(`http://localhost:${port}`);
+    });
+    server.once('error', reject);
   });
 }
 
