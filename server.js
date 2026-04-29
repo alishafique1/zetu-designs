@@ -14,8 +14,67 @@ import http from 'http';
 import { createClient } from '@supabase/supabase-js';
 import Stripe from 'stripe';
 import { Webhook } from 'svix';
+import { createClerkClient } from '@clerk/clerk-sdk-node';
+import { validate as uuidValidate, version as uuidVersion } from 'uuid';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// ---------------------------------------------------------------------------
+// Module-level singletons
+// ---------------------------------------------------------------------------
+
+let _supabase;
+function getSupabase() {
+  if (!_supabase) {
+    _supabase = createClient(
+      process.env.DATABASE_URL || 'postgresql://localhost/social_dots_studio',
+      process.env.SUPABASE_SERVICE_KEY || 'anonymous'
+    );
+  }
+  return _supabase;
+}
+
+let _clerk;
+function getClerk() {
+  if (!_clerk) {
+    const secretKey = process.env.CLERK_SECRET_KEY;
+    if (!secretKey) throw new Error('CLERK_SECRET_KEY is not set');
+    _clerk = createClerkClient({ secretKey });
+  }
+  return _clerk;
+}
+
+const clerk = getClerk(); // early init to fail fast
+
+// ---------------------------------------------------------------------------
+// AES-256-GCM encryption helpers (for user API keys)
+// ---------------------------------------------------------------------------
+
+function getEncryptionKey() {
+  const key = process.env.ENCRYPTION_KEY;
+  if (!key) throw new Error('ENCRYPTION_KEY not set');
+  return Buffer.from(key, 'base64');
+}
+
+function encryptApiKey(plaintext) {
+  const key = getEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return Buffer.concat([iv, authTag, encrypted]).toString('base64');
+}
+
+function decryptApiKey(payload) {
+  const key = getEncryptionKey();
+  const buf = Buffer.from(payload, 'base64');
+  const iv = buf.slice(0, 12);
+  const authTag = buf.slice(12, 28);
+  const encrypted = buf.slice(28);
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+  decipher.setAuthTag(authTag);
+  return decipher.update(encrypted) + decipher.final('utf8');
+}
 
 // ---------------------------------------------------------------------------
 // App init
@@ -25,42 +84,52 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // ---------------------------------------------------------------------------
-// Database (PostgreSQL)
-// ---------------------------------------------------------------------------
-
-function getSupabase() {
-  return createClient(
-    process.env.DATABASE_URL || 'postgresql://localhost/social_dots_studio',
-    process.env.SUPABASE_SERVICE_KEY || 'anonymous'
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Middleware
 // ---------------------------------------------------------------------------
 
 app.use(express.json({ limit: '4mb' }));
 
-// Extract Clerk user ID from Authorization header (Bearer token)
-// In production this would validate the Clerk JWT. For the simple API key
-// model, we accept X-User-ID directly from the frontend.
-function requireAuth(req, res, next) {
-  // In full Clerk setup: verify JWT, set req.userId from Clerk token.
-  // For simple deploy: accept X-User-ID header from the frontend.
-  const userId = req.headers['x-user-id'];
-  if (!userId) {
-    // Fallback: allow unauthenticated health/skill calls
-    return next();
-  }
-  req.userId = userId;
-  next();
+// Validate that a string is a well-formed UUID v4
+function isValidUUID(id) {
+  return uuidValidate(id) && uuidVersion(id) === 4;
 }
 
-// Attach userId to requests (simple mode — swap for Clerk JWT validation)
-app.use((req, _res, next) => {
-  req.userId = req.headers['x-user-id'] || 'anon';
-  next();
-});
+// Auth middleware: verifies Clerk JWT from Authorization: Bearer <token>
+// Sets req.userId (internal UUID) and req.clerkUserId (Clerk ID)
+async function requireAuth(req, res, next) {
+  const header = req.headers['authorization'] || req.headers['Authorization'];
+  if (!header?.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Missing or invalid Authorization header' });
+  }
+
+  const token = header.slice(7);
+  try {
+    const payload = await getClerk().verifyToken(token, {
+      issuer: (opts) => `https://${opts.frontendApi}/`,
+    });
+    req.clerkUserId = payload.sub;
+
+    // Look up internal UUID from clerk_id
+    const { data: user } = await getSupabase()
+      .from('users')
+      .select('id')
+      .eq('clerk_id', req.clerkUserId)
+      .single();
+
+    if (!user) {
+      return res.status(401).json({ error: 'User not found in database' });
+    }
+    req.userId = user.id;
+    next();
+  } catch (err) {
+    console.error('[auth] verifyToken failed:', err.message);
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Upload handling (multer)
+// ---------------------------------------------------------------------------
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -119,6 +188,208 @@ const AGENTS = [
 
 app.get('/api/agents', (_req, res) => {
   res.json({ agents: AGENTS });
+});
+
+// ---------------------------------------------------------------------------
+// User — profile, API keys, platform mode, usage
+// ---------------------------------------------------------------------------
+
+app.get('/api/user/me', requireAuth, async (req, res) => {
+  try {
+    const { data: user } = await getSupabase()
+      .from('users')
+      .select('id, email, plan, platform_mode, generations_limit, generations_used, stripe_customer_id, subscription_status, current_period_end')
+      .eq('id', req.userId)
+      .single();
+    if (!user) return res.status(404).json({ error: 'not found' });
+
+    const { data: apiKey } = await getSupabase()
+      .from('user_api_keys')
+      .select('provider, key_fingerprint')
+      .eq('user_id', req.userId)
+      .eq('is_active', true)
+      .maybeSingle();
+
+    res.json({
+      ...user,
+      hasApiKey: !!apiKey,
+      apiKeyProvider: apiKey?.provider || null,
+      apiKeyFingerprint: apiKey?.key_fingerprint ? '****' + apiKey.key_fingerprint.slice(-4) : null,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+app.post('/api/user/api-key', requireAuth, async (req, res) => {
+  const { provider, apiKey } = req.body;
+  if (!provider || !apiKey) return res.status(400).json({ error: 'provider and apiKey required' });
+  if (!['anthropic', 'openai'].includes(provider)) return res.status(400).json({ error: 'invalid provider' });
+
+  try {
+    let valid = false;
+    if (provider === 'anthropic') {
+      const r = await fetch('https://api.anthropic.com/v1/models', {
+        headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
+      });
+      valid = r.ok;
+    } else if (provider === 'openai') {
+      const r = await fetch('https://api.openai.com/v1/models', {
+        headers: { 'Authorization': `Bearer ${apiKey}` }
+      });
+      valid = r.ok;
+    }
+    if (!valid) return res.status(400).json({ error: 'invalid API key — could not authenticate' });
+
+    const keyHash = crypto.createHash('sha256').update(apiKey).digest('hex').slice(0, 16);
+    const encrypted = encryptApiKey(apiKey);
+
+    await getSupabase().from('user_api_keys').upsert({
+      user_id: req.userId,
+      provider,
+      key_fingerprint: keyHash,
+      encrypted_payload: encrypted,
+      is_active: true,
+    }, { onConflict: 'user_id,provider' });
+
+    res.json({ ok: true, fingerprint: '****' + keyHash.slice(-4) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+app.delete('/api/user/api-key', requireAuth, async (req, res) => {
+  const { provider } = req.query;
+  if (!provider) return res.status(400).json({ error: 'provider required' });
+  try {
+    await getSupabase().from('user_api_keys')
+      .update({ is_active: false })
+      .eq('user_id', req.userId)
+      .eq('provider', provider);
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+app.post('/api/user/platform-mode', requireAuth, async (req, res) => {
+  const { mode } = req.body;
+  if (!['zetu', 'byok'].includes(mode)) return res.status(400).json({ error: 'invalid mode' });
+
+  if (mode === 'byok') {
+    const { data: key } = await getSupabase().from('user_api_keys')
+      .select('id').eq('user_id', req.userId).eq('is_active', true).maybeSingle();
+    if (!key) return res.status(400).json({ error: 'no active API key — add one first' });
+  }
+
+  try {
+    await getSupabase().from('users').update({ platform_mode: mode }).eq('id', req.userId);
+    res.json({ ok: true });
+  } catch {
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+app.get('/api/user/usage', requireAuth, async (req, res) => {
+  const period = req.query.period || `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+
+  try {
+    const { data: platformUsage } = await getSupabase()
+      .from('platform_usage')
+      .select('*')
+      .eq('user_id', req.userId)
+      .eq('period', period)
+      .maybeSingle();
+
+    const { data: monthlyUsage } = await getSupabase()
+      .from('monthly_usage')
+      .select('*')
+      .eq('user_id', req.userId)
+      .eq('period', period)
+      .maybeSingle();
+
+    const { data: user } = await getSupabase()
+      .from('users')
+      .select('platform_mode, generations_limit, generations_used')
+      .eq('id', req.userId)
+      .single();
+
+    res.json({
+      period,
+      platformMode: user?.platform_mode || 'zetu',
+      generationsUsed: platformUsage?.generations_used || 0,
+      generationsLimit: user?.generations_limit || 10,
+      tokensUsed: platformUsage?.tokens_used || 0,
+      inputTokens: monthlyUsage?.input_tokens || 0,
+      outputTokens: monthlyUsage?.output_tokens || 0,
+      apiCostCents: monthlyUsage?.api_cost_cents || 0,
+      platformFeeCents: monthlyUsage?.platform_fee_cents || 0,
+      generations: monthlyUsage?.generations || 0,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'failed' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Billing — Stripe checkout and customer portal
+// ---------------------------------------------------------------------------
+
+app.get('/api/billing/checkout', requireAuth, async (req, res) => {
+  const { plan } = req.query;
+  if (!['starter', 'pro'].includes(plan)) return res.status(400).json({ error: 'invalid plan' });
+
+  const priceIds = {
+    starter: process.env.STRIPE_STARTER_PRICE_ID,
+    pro: process.env.STRIPE_PRO_PRICE_ID,
+  };
+  const priceId = priceIds[plan];
+  if (!priceId) return res.status(500).json({ error: 'Price ID not configured' });
+
+  try {
+    const { data: user } = await getSupabase().from('users').select('stripe_customer_id, email').eq('id', req.userId).single();
+    let customerId = user?.stripe_customer_id;
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({ email: user?.email });
+      customerId = customer.id;
+      await getSupabase().from('users').update({ stripe_customer_id: customerId }).eq('id', req.userId);
+    }
+
+    const session = await stripe.checkout.sessions.create({
+      customer: customerId,
+      mode: 'subscription',
+      payment_method_types: ['card'],
+      line_items: [{ price: priceId, quantity: 1 }],
+      success_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings?billing=success`,
+      cancel_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings?billing=cancelled`,
+      metadata: { userId: req.userId, plan },
+    });
+
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error('[checkout]', err);
+    res.status(500).json({ error: 'checkout failed' });
+  }
+});
+
+app.post('/api/billing/portal', requireAuth, async (req, res) => {
+  try {
+    const { data: user } = await getSupabase().from('users').select('stripe_customer_id').eq('id', req.userId).single();
+    if (!user?.stripe_customer_id) return res.status(400).json({ error: 'no stripe customer' });
+
+    const session = await stripe.billingPortal.sessions.create({
+      customer: user.stripe_customer_id,
+      return_url: `${process.env.NEXT_PUBLIC_APP_URL}/settings`,
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'portal failed' });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -714,11 +985,51 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     fullSystem = systemPrompt;
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    sendError('ANTHROPIC_API_KEY not configured');
-    return;
+  // Determine user's platform mode and get appropriate API key
+  const { data: user } = await getSupabase()
+    .from('users')
+    .select('platform_mode, plan, generations_limit, generations_used')
+    .eq('id', req.userId)
+    .single();
+
+  const platformMode = user?.platform_mode || 'zetu';
+  let apiKey;
+  let isZetuKey = false;
+
+  if (platformMode === 'byok') {
+    // Decrypt user's API key
+    const { data: userKey } = await getSupabase()
+      .from('user_api_keys')
+      .select('encrypted_payload, provider')
+      .eq('user_id', req.userId)
+      .eq('is_active', true)
+      .eq('provider', 'anthropic')
+      .maybeSingle();
+
+    if (!userKey) {
+      sendError('No active Anthropic API key — add one in settings or switch to Zetu mode');
+      return;
+    }
+    apiKey = decryptApiKey(userKey.encrypted_payload);
+  } else {
+    // Zetu platform key
+    apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      sendError('Platform API key not configured');
+      return;
+    }
+    isZetuKey = true;
+
+    // Check generation limit
+    if ((user?.generations_used || 0) >= (user?.generations_limit || 10)) {
+      sendError(`Generation limit reached (${user.generations_limit}/month). Upgrade or enable BYOK mode.`);
+      return;
+    }
   }
+
+  // Track tokens for usage recording
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   send('start', { bin: 'anthropic-api' });
 
@@ -784,6 +1095,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
           const event = JSON.parse(jsonStr);
 
           if (event.type === 'message_start') {
+            totalInputTokens = event.message?.usage?.input_tokens || 0;
             send('agent', {
               type: 'status',
               label: 'requesting',
@@ -817,6 +1129,7 @@ app.post('/api/chat', requireAuth, async (req, res) => {
 
           if (event.type === 'message_delta') {
             const usage = event.usage || {};
+            totalOutputTokens = usage.output_tokens || 0;
             send('agent', {
               type: 'usage',
               usage: {
@@ -860,6 +1173,48 @@ app.post('/api/chat', requireAuth, async (req, res) => {
     }
 
     res.end();
+
+    // Fire-and-forget usage recording (after streaming completes)
+    const totalTokens = totalInputTokens + totalOutputTokens;
+
+    // Record Zetu platform usage
+    if (isZetuKey) {
+      const period = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+      getSupabase().from('platform_usage')
+        .upsert({
+          user_id: req.userId,
+          period,
+          plan: user?.plan || 'free',
+          generations_used: (user?.generations_used || 0) + 1,
+          tokens_used: totalTokens,
+        }, { onConflict: 'user_id,period' })
+        .then(() => getSupabase().from('users')
+          .update({ generations_used: (user?.generations_used || 0) + 1 })
+          .eq('id', req.userId))
+        .catch(() => {});
+    }
+
+    // Record BYOK usage for billing
+    if (!isZetuKey && totalInputTokens > 0) {
+      const period = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+      const inputCostCents = Math.round((totalInputTokens / 1_000_000) * 3.75 * 100);
+      const outputCostCents = Math.round((totalOutputTokens / 1_000_000) * 15.00 * 100);
+      const totalCostCents = inputCostCents + outputCostCents;
+      const platformFeeCents = Math.round(totalCostCents * 0.05);
+
+      getSupabase().from('monthly_usage')
+        .upsert({
+          user_id: req.userId,
+          period,
+          provider: 'anthropic',
+          input_tokens: totalInputTokens,
+          output_tokens: totalOutputTokens,
+          api_cost_cents: totalCostCents,
+          platform_fee_cents: platformFeeCents,
+          generations: 1,
+        }, { onConflict: 'user_id,period,provider' })
+        .catch(() => {});
+    }
 
   } catch (err) {
     sendError(String(err));

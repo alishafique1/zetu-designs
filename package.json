@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@clerk/clerk-sdk-node": "^5.1.6",
     "@clerk/nextjs": "^7.2.8",
     "better-sqlite3": "^11.10.0",
     "express": "^4.19.2",

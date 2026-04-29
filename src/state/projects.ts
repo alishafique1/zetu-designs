@@ -13,10 +13,11 @@ import type {
   ProjectMetadata,
   ProjectTemplate,
 } from '../types';
+import { authHeaders } from '../providers/auth';
 
 export async function listProjects(): Promise<Project[]> {
   try {
-    const resp = await fetch('/api/projects');
+    const resp = await fetch('/api/projects', { headers: await authHeaders() });
     if (!resp.ok) return [];
     const json = (await resp.json()) as { projects: Project[] };
     return json.projects ?? [];
@@ -27,7 +28,7 @@ export async function listProjects(): Promise<Project[]> {
 
 export async function getProject(id: string): Promise<Project | null> {
   try {
-    const resp = await fetch(`/api/projects/${encodeURIComponent(id)}`);
+    const resp = await fetch(`/api/projects/${encodeURIComponent(id)}`, { headers: await authHeaders() });
     if (!resp.ok) return null;
     const json = (await resp.json()) as { project: Project };
     return json.project;
@@ -47,7 +48,7 @@ export async function createProject(input: {
     const id = crypto.randomUUID();
     const resp = await fetch('/api/projects', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
       body: JSON.stringify({ id, ...input }),
     });
     if (!resp.ok) return null;
@@ -65,6 +66,7 @@ export async function importClaudeDesignZip(
     form.append('file', file);
     const resp = await fetch('/api/import/claude-design', {
       method: 'POST',
+      headers: { ...(await authHeaders()) },
       body: form,
     });
     if (!resp.ok) return null;
@@ -82,7 +84,7 @@ export async function importClaudeDesignZip(
 
 export async function listTemplates(): Promise<ProjectTemplate[]> {
   try {
-    const resp = await fetch('/api/templates');
+    const resp = await fetch('/api/templates', { headers: await authHeaders() });
     if (!resp.ok) return [];
     const json = (await resp.json()) as { templates: ProjectTemplate[] };
     return json.templates ?? [];
@@ -93,7 +95,7 @@ export async function listTemplates(): Promise<ProjectTemplate[]> {
 
 export async function getTemplate(id: string): Promise<ProjectTemplate | null> {
   try {
-    const resp = await fetch(`/api/templates/${encodeURIComponent(id)}`);
+    const resp = await fetch(`/api/templates/${encodeURIComponent(id)}`, { headers: await authHeaders() });
     if (!resp.ok) return null;
     const json = (await resp.json()) as { template: ProjectTemplate };
     return json.template;
@@ -110,7 +112,7 @@ export async function saveTemplate(input: {
   try {
     const resp = await fetch('/api/templates', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
       body: JSON.stringify(input),
     });
     if (!resp.ok) return null;
@@ -125,6 +127,7 @@ export async function deleteTemplate(id: string): Promise<boolean> {
   try {
     const resp = await fetch(`/api/templates/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      headers: await authHeaders(),
     });
     return resp.ok;
   } catch {
@@ -139,7 +142,7 @@ export async function patchProject(
   try {
     const resp = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
       body: JSON.stringify(patch),
     });
     if (!resp.ok) return null;
@@ -154,6 +157,7 @@ export async function deleteProject(id: string): Promise<boolean> {
   try {
     const resp = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
       method: 'DELETE',
+      headers: await authHeaders(),
     });
     return resp.ok;
   } catch {
@@ -169,6 +173,7 @@ export async function listConversations(
   try {
     const resp = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/conversations`,
+      { headers: await authHeaders() },
     );
     if (!resp.ok) return [];
     const json = (await resp.json()) as { conversations: Conversation[] };
@@ -187,7 +192,7 @@ export async function createConversation(
       `/api/projects/${encodeURIComponent(projectId)}/conversations`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         body: JSON.stringify({ title }),
       },
     );
@@ -209,7 +214,7 @@ export async function patchConversation(
       `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}`,
       {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
         body: JSON.stringify(patch),
       },
     );
@@ -228,7 +233,7 @@ export async function deleteConversation(
   try {
     const resp = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}`,
-      { method: 'DELETE' },
+      { method: 'DELETE', headers: await authHeaders() },
     );
     return resp.ok;
   } catch {

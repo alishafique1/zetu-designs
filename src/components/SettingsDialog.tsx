@@ -8,6 +8,7 @@ import {
   renderModelOptions,
 } from './modelOptions';
 import type { AgentInfo, AppConfig, ExecMode } from '../types';
+import { BillingSettings } from './BillingSettings';
 
 interface Props {
   initial: AppConfig;
@@ -374,6 +375,13 @@ export function SettingsDialog({
                 );
               })}
             </div>
+          </section>
+
+          <section className="settings-section">
+            <div className="section-head">
+              <h3>Billing</h3>
+            </div>
+            <BillingSettings />
           </section>
         </div>
 

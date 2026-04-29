@@ -69,9 +69,10 @@ export async function streamViaDaemon({
   let exitCode: number | null = null;
 
   try {
+    const { authHeaders } = await import('./auth');
     const resp = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(await authHeaders()) },
       body,
       signal,
     });
