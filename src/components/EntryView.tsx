@@ -18,6 +18,7 @@ import { Icon } from './Icon';
 import { LanguageMenu } from './LanguageMenu';
 import { CenteredLoader } from './Loading';
 import { NewProjectPanel, type CreateInput } from './NewProjectPanel';
+import type { SettingsTab } from './SettingsDialog';
 
 type TopTab = 'designs' | 'examples' | 'design-systems';
 
@@ -34,7 +35,7 @@ interface Props {
   onOpenProject: (id: string) => void;
   onDeleteProject: (id: string) => void;
   onChangeDefaultDesignSystem: (id: string) => void;
-  onOpenSettings: () => void;
+  onOpenSettings: (tab?: SettingsTab) => void;
 }
 
 const SIDEBAR_MIN = 320;
@@ -176,14 +177,16 @@ export function EntryView({
           designSystems={designSystems}
           defaultDesignSystemId={defaultDesignSystemId}
           templates={templates}
+          config={config}
           onCreate={handleCreate}
+          onOpenSettings={onOpenSettings}
           loading={loading}
         />
         <div className="entry-side-foot">
           <button
             type="button"
             className="foot-pill"
-            onClick={onOpenSettings}
+            onClick={() => onOpenSettings()}
             title={t('settings.envConfigure')}
           >
             <Icon name="settings" size={12} />
@@ -228,7 +231,7 @@ export function EntryView({
             <button
               type="button"
               className="avatar-btn"
-              onClick={onOpenSettings}
+              onClick={() => onOpenSettings()}
               title={t('entry.openSettingsTitle')}
               aria-label={t('entry.openSettingsAria')}
             >

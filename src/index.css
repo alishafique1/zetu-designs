@@ -697,7 +697,137 @@ code {
   50% { opacity: 0.6; transform: scale(0.85); }
 }
 
-.modal-settings { width: 600px; padding: 24px; gap: 18px; }
+.modal-settings {
+  width: 760px;
+  padding: 0;
+  gap: 0;
+  /* Cap modal height so the side-rail + content panel scroll
+     independently rather than the whole dialog ballooning vertically. */
+  max-height: calc(100vh - 64px);
+  overflow: hidden;
+}
+.modal-head-settings {
+  padding: 22px 24px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-settings-body {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.modal-settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 10px;
+  background: var(--bg-subtle);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.modal-settings-tab {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  position: relative;
+}
+.modal-settings-tab:hover:not(.active) {
+  background: rgba(255, 255, 255, 0.6);
+}
+.modal-settings-tab.active {
+  background: var(--bg-panel);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-xs);
+}
+.modal-settings-tab-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.modal-settings-tab.active .modal-settings-tab-icon {
+  color: var(--accent);
+}
+.modal-settings-tab-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1;
+}
+.modal-settings-tab-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modal-settings-tab-hint {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.modal-settings-tab-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: white;
+  background: var(--accent);
+  border-radius: var(--radius-pill);
+}
+.modal-settings-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 22px;
+}
+.modal-settings-panel-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.modal-settings .modal-foot {
+  margin-top: 0;
+  padding: 12px 22px 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* Mobile / narrow-screen fallback: stack the nav above the panel.
+   The dialog already shrinks to viewport width via max-width; this
+   keeps both rails legible when there's no horizontal room for the
+   sidebar. */
+@media (max-width: 720px) {
+  .modal-settings { width: calc(100vw - 24px); }
+  .modal-settings-body {
+    grid-template-columns: 1fr;
+  }
+  .modal-settings-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    padding: 8px;
+  }
+  .modal-settings-tab {
+    flex: 0 0 auto;
+  }
+  .modal-settings-tab-hint { display: none; }
+}
+
 .modal-head { display: flex; flex-direction: column; gap: 4px; }
 .modal-head .kicker {
   font-size: 11px;
@@ -1189,6 +1319,280 @@ code {
   font-size: 10.5px;
   color: var(--text-muted);
 }
+
+/* Model picker — provider grouping */
+.model-picker-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.newproj-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.newproj-link:hover:not(:disabled) {
+  background: transparent;
+  color: var(--accent-strong);
+  border-color: transparent;
+}
+.model-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.model-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.model-group-name {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.model-group-meta {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.model-group-badge {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  padding: 1px 6px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+  text-transform: uppercase;
+}
+.model-group-badge.ok {
+  color: var(--green);
+  background: var(--green-bg);
+  border-color: var(--green-border);
+}
+.model-group-badge.pending {
+  color: var(--text-soft);
+  background: var(--bg-subtle);
+  border-color: var(--border);
+}
+.model-group-badge.needs-key {
+  color: var(--amber);
+  background: var(--amber-bg);
+  border-color: #ffd9a8;
+}
+
+/* Inline "Configure key" CTA next to a provider header. Pill-shaped to
+   read as an actionable affordance (vs. the static badges next to it).
+   Amber tint mirrors the unconfigured state so the eye can pair them. */
+.model-group-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--amber);
+  background: var(--amber-bg);
+  border: 1px solid #ffd9a8;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  text-transform: none;
+}
+.model-group-cta:hover {
+  background: #ffe9cf;
+  border-color: #f5b465;
+}
+.model-group-cta svg {
+  flex-shrink: 0;
+}
+
+/* Dimmed group: provider integration not shipped yet, OR shipped but
+   no key configured. Cards stay clickable so users can still preview
+   and pick — the warning banner under the picker handles the rest. */
+.model-group.dimmed .model-group-name {
+  color: var(--text-faint);
+}
+.model-card.dimmed {
+  opacity: 0.55;
+  background: var(--bg-subtle);
+  border-style: dashed;
+}
+.model-card.dimmed:hover:not(:disabled) {
+  opacity: 0.85;
+  border-style: solid;
+}
+.model-card.dimmed.active {
+  opacity: 1;
+  border-style: solid;
+  border-color: var(--amber);
+  background: var(--amber-bg);
+}
+
+/* "This model needs an API key" banner — appears under the picker when
+   the user has actually selected a model whose provider isn't configured.
+   We keep it scoped to the picker rather than blocking Create, so the
+   user can still queue the project (the daemon falls back to a stub). */
+.model-needs-key {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--amber-bg);
+  border: 1px solid #ffd9a8;
+  border-radius: var(--radius-sm);
+}
+.model-needs-key-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #ffe1b8;
+  color: var(--amber);
+  flex-shrink: 0;
+}
+.model-needs-key-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.model-needs-key-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+.model-needs-key-body {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+.model-needs-key-cta {
+  flex-shrink: 0;
+  padding: 5px 10px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: white;
+  background: var(--amber);
+  border: 1px solid var(--amber);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.model-needs-key-cta:hover {
+  background: #c97400;
+  border-color: #c97400;
+}
+
+/* Settings — media providers list */
+.media-provider-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.media-provider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.media-provider-row.pending {
+  background: var(--bg-subtle);
+  border-style: dashed;
+}
+.media-provider-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+.media-provider-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.media-provider-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.media-provider-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.media-provider-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+.media-provider-badge {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+  text-transform: uppercase;
+}
+.media-provider-badge.ok {
+  color: var(--green);
+  background: var(--green-bg);
+  border-color: var(--green-border);
+}
+.media-provider-badge.pending {
+  color: var(--text-soft);
+  background: var(--bg-subtle);
+  border-color: var(--border);
+}
+.media-provider-badge.on {
+  color: var(--blue);
+  background: var(--blue-bg);
+  border-color: var(--blue-border);
+}
+.media-provider-badge.off {
+  color: var(--text-soft);
+  background: var(--bg-subtle);
+  border-color: var(--border);
+}
+.media-provider-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.media-provider-baseurl {
+  width: 100%;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.media-provider-docs {
+  font-size: 11px;
+  color: var(--accent);
+  text-decoration: none;
+  align-self: flex-start;
+}
+.media-provider-docs:hover { text-decoration: underline; }
 
 .aspect-grid {
   display: grid;

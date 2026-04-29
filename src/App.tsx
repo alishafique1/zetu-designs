@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { EntryView } from './components/EntryView';
 import type { CreateInput } from './components/NewProjectPanel';
 import { ProjectView } from './components/ProjectView';
-import { SettingsDialog } from './components/SettingsDialog';
+import { SettingsDialog, type SettingsTab } from './components/SettingsDialog';
 import {
   daemonIsLive,
   fetchAgents,
@@ -10,7 +10,12 @@ import {
   fetchSkills,
 } from './providers/registry';
 import { navigate, useRoute } from './router';
-import { loadConfig, saveConfig } from './state/config';
+import {
+  hasAnyConfiguredProvider,
+  loadConfig,
+  saveConfig,
+  syncMediaProvidersToDaemon,
+} from './state/config';
 import {
   createProject,
   deleteProject as deleteProjectApi,
@@ -31,6 +36,7 @@ export function App() {
   const [config, setConfig] = useState<AppConfig>(() => loadConfig());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsWelcome, setSettingsWelcome] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab | undefined>(undefined);
   const [daemonLive, setDaemonLive] = useState(false);
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [skills, setSkills] = useState<SkillSummary[]>([]);
@@ -82,6 +88,20 @@ export function App() {
           next.mode = 'api';
         }
         saveConfig(next);
+        // Re-sync media provider keys to the daemon on every page load
+        // so a fresh daemon start (which doesn't see localStorage) picks
+        // them up without requiring the user to open Settings.
+        //
+        // Important: only sync when we actually have credentials to push.
+        // The frontend's PUT replaces the daemon's stored config, so a
+        // fresh-localStorage bootstrap (e.g. the user opens the app on a
+        // new origin / port / device) would otherwise wipe out keys that
+        // the daemon already has from a previous session or an env var.
+        // Saves from Settings still go through `handleConfigSave` and
+        // can clear individual entries explicitly.
+        if (alive && hasAnyConfiguredProvider(next.mediaProviders)) {
+          void syncMediaProvidersToDaemon(next.mediaProviders);
+        }
 
         // Pop the onboarding modal only on the first run. Once the user has
         // saved or skipped past it once, we trust their stored config and
@@ -116,6 +136,9 @@ export function App() {
     const withOnboarding: AppConfig = { ...next, onboardingCompleted: true };
     saveConfig(withOnboarding);
     setConfig(withOnboarding);
+    // Push media provider credentials to the daemon. Fire-and-forget;
+    // a failure here just means the daemon will fall back to env-vars.
+    void syncMediaProvidersToDaemon(withOnboarding.mediaProviders);
     setSettingsOpen(false);
   }, []);
 
@@ -244,8 +267,9 @@ export function App() {
     };
   }, [route, activeProject, projects, daemonLive]);
 
-  const openSettings = useCallback(() => {
+  const openSettings = useCallback((tab?: SettingsTab) => {
     setSettingsWelcome(false);
+    setSettingsInitialTab(tab);
     setSettingsOpen(true);
   }, []);
 
@@ -303,6 +327,7 @@ export function App() {
           agents={agents}
           daemonLive={daemonLive}
           welcome={settingsWelcome}
+          initialTab={settingsInitialTab}
           onSave={handleConfigSave}
           onClose={() => {
             // Dismissing the welcome modal (Skip for now / backdrop click)
@@ -315,6 +340,9 @@ export function App() {
               setConfig(next);
             }
             setSettingsOpen(false);
+            // Clear the deep-linked tab so the next plain `openSettings()`
+            // call lands back on Execution rather than wherever we were.
+            setSettingsInitialTab(undefined);
           }}
           onRefreshAgents={refreshAgents}
         />

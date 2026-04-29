@@ -150,8 +150,35 @@ async function runMedia(args) {
     console.error(`daemon ${resp.status}: ${text}`);
     process.exit(4);
   }
+  // The daemon sometimes "succeeds" by writing a stub fallback after the
+  // real provider call failed (so the agent's chat loop doesn't dead-end).
+  // Inspect the response and shout the failure on stderr so a code agent
+  // sees it clearly: stdout stays a single JSON line for parsing, stderr
+  // carries the human-readable warning that maps onto a chat warning.
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = null;
+  }
+  const file = parsed && parsed.file;
+  if (file && file.providerError) {
+    const provider = file.providerId || 'provider';
+    console.error(
+      `WARN: ${provider} call failed — wrote stub fallback (${file.size} bytes) to ${file.name}`,
+    );
+    console.error(`WARN: reason: ${file.providerError}`);
+    console.error(
+      'WARN: surface this verbatim to the user. Do NOT claim the stub is the final result.',
+    );
+  }
   // Print the JSON response as one line so the agent can parse it.
   process.stdout.write(text.trim() + '\n');
+  if (file && file.providerError) {
+    // Exit non-zero so shells/agents that gate on $? notice. We use 5
+    // (distinct from 1-4 above) to mean "daemon ok, provider failed".
+    process.exit(5);
+  }
 }
 
 // Flags accepted by `od media generate`. Whitelisted so a hallucinated

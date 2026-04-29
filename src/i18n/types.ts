@@ -93,6 +93,28 @@ export interface Dict {
   'settings.noAgentSelected': string;
   'settings.language': string;
   'settings.languageHint': string;
+  'settings.tabExecution': string;
+  'settings.tabExecutionHint': string;
+  'settings.tabMedia': string;
+  'settings.tabMediaHint': string;
+  'settings.tabLanguage': string;
+  'settings.tabLanguageHint': string;
+  'settings.tabsAria': string;
+  'settings.mediaProviders': string;
+  'settings.mediaProvidersHint': string;
+  'settings.mediaProviderApiKey': string;
+  'settings.mediaProviderBaseUrl': string;
+  'settings.mediaProviderConfigured': string;
+  'settings.mediaProviderUnset': string;
+  'settings.mediaProviderEnv': string;
+  'settings.mediaProviderIntegrated': string;
+  'settings.mediaProviderPending': string;
+  'settings.mediaProviderDocs': string;
+  'settings.mediaProviderClear': string;
+  'settings.mediaProviderPlaceholder': string;
+  'settings.mediaProviderBaseUrlPlaceholder': string;
+  'settings.mediaSectionExpand': string;
+  'settings.mediaSectionCollapse': string;
 
   // Entry view / tabs
   'entry.tabDesigns': string;
@@ -132,6 +154,10 @@ export interface Dict {
   // Media-specific labels for the Image / Video / Audio forms.
   'newproj.modelLabel': string;
   'newproj.modelHint': string;
+  'newproj.modelConfigureCta': string;
+  'newproj.modelConfigureTitle': string;
+  'newproj.modelNeedsKeyTitle': string;
+  'newproj.modelNeedsKeyBody': string;
   'newproj.aspectLabel': string;
   'newproj.aspectSquare': string;
   'newproj.aspectLandscape': string;

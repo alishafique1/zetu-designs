@@ -8,8 +8,11 @@ import {
   DEFAULT_VIDEO_MODEL,
   IMAGE_MODELS,
   VIDEO_MODELS,
+  groupByProvider,
 } from '../media/models';
+import type { MediaModel } from '../media/models';
 import type {
+  AppConfig,
   AudioKind,
   DesignSystemSummary,
   MediaAspect,
@@ -21,6 +24,7 @@ import type {
 } from '../types';
 import { Icon } from './Icon';
 import { Skeleton } from './Loading';
+import type { SettingsTab } from './SettingsDialog';
 
 type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => string;
 
@@ -40,7 +44,14 @@ interface Props {
   designSystems: DesignSystemSummary[];
   defaultDesignSystemId: string | null;
   templates: ProjectTemplate[];
+  // Config is forwarded to the model picker so it can show "needs key"
+  // affordances for providers that aren't configured yet, and stay in
+  // sync with the latest Settings save without re-reading localStorage.
+  config: AppConfig;
   onCreate: (input: CreateInput) => void;
+  // Lets the model picker deep-link the user to the Media tab in
+  // Settings when they hit a provider that needs an API key.
+  onOpenSettings: (tab?: SettingsTab) => void;
   loading?: boolean;
 }
 
@@ -83,7 +94,9 @@ export function NewProjectPanel({
   designSystems,
   defaultDesignSystemId,
   templates,
+  config,
   onCreate,
+  onOpenSettings,
   loading = false,
 }: Props) {
   const t = useT();
@@ -306,6 +319,8 @@ export function NewProjectPanel({
             onChangeAspect={setImageAspect}
             style={imageStyle}
             onChangeStyle={setImageStyle}
+            config={config}
+            onOpenSettings={onOpenSettings}
           />
         ) : null}
 
@@ -317,6 +332,8 @@ export function NewProjectPanel({
             onChangeLength={setVideoLength}
             aspect={videoAspect}
             onChangeAspect={setVideoAspect}
+            config={config}
+            onOpenSettings={onOpenSettings}
           />
         ) : null}
 
@@ -330,6 +347,8 @@ export function NewProjectPanel({
             onChangeDuration={setAudioDuration}
             voice={voice}
             onChangeVoice={setVoice}
+            config={config}
+            onOpenSettings={onOpenSettings}
           />
         ) : null}
 
@@ -407,6 +426,8 @@ function ImageForm({
   onChangeAspect,
   style,
   onChangeStyle,
+  config,
+  onOpenSettings,
 }: {
   model: string;
   onChangeModel: (id: string) => void;
@@ -414,6 +435,8 @@ function ImageForm({
   onChangeAspect: (a: MediaAspect) => void;
   style: string;
   onChangeStyle: (s: string) => void;
+  config: AppConfig;
+  onOpenSettings: (tab?: SettingsTab) => void;
 }) {
   const t = useT();
   return (
@@ -421,7 +444,9 @@ function ImageForm({
       <ModelPicker
         value={model}
         onChange={onChangeModel}
-        options={IMAGE_MODELS}
+        models={IMAGE_MODELS}
+        config={config}
+        onOpenSettings={onOpenSettings}
       />
       <AspectPicker
         value={aspect}
@@ -449,6 +474,8 @@ function VideoForm({
   onChangeLength,
   aspect,
   onChangeAspect,
+  config,
+  onOpenSettings,
 }: {
   model: string;
   onChangeModel: (id: string) => void;
@@ -456,12 +483,20 @@ function VideoForm({
   onChangeLength: (n: number) => void;
   aspect: MediaAspect;
   onChangeAspect: (a: MediaAspect) => void;
+  config: AppConfig;
+  onOpenSettings: (tab?: SettingsTab) => void;
 }) {
   const t = useT();
   const lengths = [3, 5, 10];
   return (
     <>
-      <ModelPicker value={model} onChange={onChangeModel} options={VIDEO_MODELS} />
+      <ModelPicker
+        value={model}
+        onChange={onChangeModel}
+        models={VIDEO_MODELS}
+        config={config}
+        onOpenSettings={onOpenSettings}
+      />
       <div className="newproj-section">
         <label className="newproj-label">{t('newproj.videoLengthLabel')}</label>
         <div className="pill-grid">
@@ -496,6 +531,8 @@ function AudioForm({
   onChangeDuration,
   voice,
   onChangeVoice,
+  config,
+  onOpenSettings,
 }: {
   kind: AudioKind;
   onChangeKind: (k: AudioKind) => void;
@@ -505,6 +542,8 @@ function AudioForm({
   onChangeDuration: (n: number) => void;
   voice: string;
   onChangeVoice: (v: string) => void;
+  config: AppConfig;
+  onOpenSettings: (tab?: SettingsTab) => void;
 }) {
   const t = useT();
   const kinds: { id: AudioKind; labelKey: keyof Dict }[] = [
@@ -537,7 +576,9 @@ function AudioForm({
       <ModelPicker
         value={model}
         onChange={onChangeModel}
-        options={AUDIO_MODELS_BY_KIND[kind]}
+        models={AUDIO_MODELS_BY_KIND[kind]}
+        config={config}
+        onOpenSettings={onOpenSettings}
       />
       <div className="newproj-section">
         <label className="newproj-label">{t('newproj.audioDurationLabel')}</label>
@@ -571,33 +612,179 @@ function AudioForm({
   );
 }
 
+/**
+ * Model picker that groups its options by provider, surfaces a "needs
+ * key" indicator when the active config has no API key for a provider,
+ * and folds non-integrated providers behind a "show all" affordance to
+ * keep the default view tight.
+ *
+ * Behavior for unconfigured / non-integrated providers:
+ *  - Provider header shows a `Configure` CTA (integrated + no key) or
+ *    a `Stub fallback` note (no upstream integration shipped yet).
+ *  - Model cards in those groups are visually de-emphasized so the user
+ *    immediately sees they aren't ready to use without setup. Cards
+ *    remain clickable so the user can still pick one and configure
+ *    afterwards — when they do, we render a clear banner above the
+ *    Create button telling them the active selection needs a key.
+ */
 function ModelPicker({
   value,
   onChange,
-  options,
+  models,
+  config,
+  onOpenSettings,
 }: {
   value: string;
   onChange: (id: string) => void;
-  options: { id: string; label: string; hint: string }[];
+  models: MediaModel[];
+  config: AppConfig;
+  onOpenSettings: (tab?: SettingsTab) => void;
 }) {
   const t = useT();
+  const [showAll, setShowAll] = useState(false);
+  const groups = useMemo(() => groupByProvider(models), [models]);
+
+  function providerHasKey(providerId: string): boolean {
+    const entry = config.mediaProviders?.[providerId];
+    return (entry?.apiKey ?? '').trim().length > 0;
+  }
+
+  const visibleGroups = useMemo(
+    () => (showAll ? groups : groups.filter((g) => g.provider.integrated)),
+    [groups, showAll],
+  );
+
+  // Always include the group containing the current selection, so a
+  // model picked via Settings doesn't suddenly hide when its provider
+  // isn't integrated yet.
+  const augmentedGroups = useMemo(() => {
+    const has = visibleGroups.some((g) => g.models.some((m) => m.id === value));
+    if (has) return visibleGroups;
+    const ownerGroup = groups.find((g) => g.models.some((m) => m.id === value));
+    if (!ownerGroup) return visibleGroups;
+    return [ownerGroup, ...visibleGroups.filter((g) => g.provider.id !== ownerGroup.provider.id)];
+  }, [visibleGroups, groups, value]);
+
+  const hiddenCount = groups.length - visibleGroups.length;
+
+  // Identify the provider that owns the currently-selected model so we
+  // can render a "Configure key" banner when its integration is shipped
+  // but the user hasn't pasted a key yet. We deliberately *don't* warn
+  // for stub providers — those generate a placeholder asset and the
+  // user already gets a "stub fallback" note inside the daemon
+  // response, so a banner here would be noise.
+  const selectedProvider = useMemo(() => {
+    const owner = groups.find((g) => g.models.some((m) => m.id === value));
+    return owner?.provider ?? null;
+  }, [groups, value]);
+  const selectedNeedsKey =
+    !!selectedProvider
+    && selectedProvider.integrated
+    && !providerHasKey(selectedProvider.id);
+
   return (
     <div className="newproj-section">
-      <label className="newproj-label">{t('newproj.modelLabel')}</label>
-      <div className="model-grid">
-        {options.map((o) => (
+      <div className="model-picker-head">
+        <label className="newproj-label">{t('newproj.modelLabel')}</label>
+        {hiddenCount > 0 || showAll ? (
           <button
-            key={o.id}
             type="button"
-            className={`model-card${value === o.id ? ' active' : ''}`}
-            onClick={() => onChange(o.id)}
-            aria-pressed={value === o.id}
+            className="newproj-link"
+            onClick={() => setShowAll((v) => !v)}
           >
-            <span className="model-card-name">{o.label}</span>
-            <span className="model-card-hint">{o.hint}</span>
+            {showAll
+              ? t('settings.mediaSectionCollapse')
+              : `${t('settings.mediaSectionExpand')} (+${hiddenCount})`}
           </button>
-        ))}
+        ) : null}
       </div>
+      <div className="model-groups">
+        {augmentedGroups.map(({ provider, models: providerModels }) => {
+          const hasKey = providerHasKey(provider.id);
+          // Two flavors of "not ready":
+          //  - integrated but missing key  →  user-fixable via Configure
+          //  - non-integrated (stub)        →  not yet shipped
+          // Both visually de-emphasize the model cards.
+          const dimmed = provider.integrated ? !hasKey : true;
+          return (
+            <div
+              key={provider.id}
+              className={`model-group${dimmed ? ' dimmed' : ''}`}
+            >
+              <div className="model-group-head">
+                <span className="model-group-name">{provider.label}</span>
+                <span className="model-group-meta">
+                  <span
+                    className={`model-group-badge ${
+                      provider.integrated ? 'ok' : 'pending'
+                    }`}
+                  >
+                    {provider.integrated
+                      ? t('settings.mediaProviderIntegrated')
+                      : t('settings.mediaProviderPending')}
+                  </span>
+                  {provider.integrated && !hasKey ? (
+                    <button
+                      type="button"
+                      className="model-group-cta"
+                      onClick={() => onOpenSettings('media')}
+                      title={t('newproj.modelConfigureTitle', {
+                        provider: provider.label,
+                      })}
+                    >
+                      <Icon name="settings" size={11} />
+                      <span>{t('newproj.modelConfigureCta')}</span>
+                    </button>
+                  ) : null}
+                </span>
+              </div>
+              <div className="model-grid">
+                {providerModels.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className={
+                      'model-card'
+                      + (value === m.id ? ' active' : '')
+                      + (dimmed ? ' dimmed' : '')
+                    }
+                    onClick={() => onChange(m.id)}
+                    aria-pressed={value === m.id}
+                    title={`${m.label} — ${m.hint}`}
+                  >
+                    <span className="model-card-name">{m.label}</span>
+                    <span className="model-card-hint">{m.hint}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {selectedNeedsKey && selectedProvider ? (
+        <div className="model-needs-key" role="status">
+          <span className="model-needs-key-icon" aria-hidden>
+            <Icon name="settings" size={13} />
+          </span>
+          <div className="model-needs-key-text">
+            <span className="model-needs-key-title">
+              {t('newproj.modelNeedsKeyTitle', {
+                provider: selectedProvider.label,
+              })}
+            </span>
+            <span className="model-needs-key-body">
+              {t('newproj.modelNeedsKeyBody')}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="model-needs-key-cta"
+            onClick={() => onOpenSettings('media')}
+          >
+            {t('newproj.modelConfigureCta')}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

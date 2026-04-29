@@ -26,11 +26,13 @@ import { generateMedia } from './media.js';
 import {
   AUDIO_MODELS_BY_KIND,
   IMAGE_MODELS,
+  MEDIA_PROVIDERS,
   VIDEO_MODELS,
   MEDIA_ASPECTS,
   VIDEO_LENGTHS_SEC,
   AUDIO_DURATIONS_SEC,
 } from './media-models.js';
+import { readMaskedConfig, writeConfig } from './media-config.js';
 import {
   deleteConversation,
   deleteProject as dbDeleteProject,
@@ -675,6 +677,7 @@ export async function startServer({ port = 7456 } = {}) {
 
   app.get('/api/media/models', (_req, res) => {
     res.json({
+      providers: MEDIA_PROVIDERS,
       image: IMAGE_MODELS,
       video: VIDEO_MODELS,
       audio: AUDIO_MODELS_BY_KIND,
@@ -682,6 +685,28 @@ export async function startServer({ port = 7456 } = {}) {
       videoLengthsSec: VIDEO_LENGTHS_SEC,
       audioDurationsSec: AUDIO_DURATIONS_SEC,
     });
+  });
+
+  // Provider credentials. The Settings dialog pushes API keys here so
+  // the daemon can dispatch real OpenAI / Volcengine / … calls. Keys
+  // round-trip masked (only the last 4 chars + `configured: true`),
+  // never the raw secret.
+  app.get('/api/media/config', async (_req, res) => {
+    try {
+      const cfg = await readMaskedConfig(PROJECT_ROOT);
+      res.json(cfg);
+    } catch (err) {
+      res.status(500).json({ error: String(err && err.message ? err.message : err) });
+    }
+  });
+
+  app.put('/api/media/config', async (req, res) => {
+    try {
+      const cfg = await writeConfig(PROJECT_ROOT, req.body);
+      res.json(cfg);
+    } catch (err) {
+      res.status(400).json({ error: String(err && err.message ? err.message : err) });
+    }
   });
 
   app.post('/api/projects/:id/media/generate', async (req, res) => {
@@ -704,6 +729,7 @@ export async function startServer({ port = 7456 } = {}) {
       const project = getProject(db, projectId);
       if (!project) return res.status(404).json({ error: 'project not found' });
       const meta = await generateMedia({
+        projectRoot: PROJECT_ROOT,
         projectsRoot: PROJECTS_DIR,
         projectId,
         surface: req.body?.surface,

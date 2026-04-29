@@ -1,5 +1,12 @@
 export type ExecMode = 'daemon' | 'api';
 
+export interface MediaProviderCredentials {
+  /** Plaintext key stored in localStorage and pushed to the daemon. */
+  apiKey: string;
+  /** Optional baseUrl override — empty string means "use the provider default". */
+  baseUrl: string;
+}
+
 export interface AppConfig {
   mode: ExecMode;
   apiKey: string;
@@ -12,6 +19,13 @@ export interface AppConfig {
   // least once (saved or skipped). Bootstrap skips the auto-popup when
   // this is set so refreshing the page doesn't re-prompt.
   onboardingCompleted?: boolean;
+  /**
+   * Per-provider credentials for the media dispatcher. Keyed by provider
+   * id (matches MediaProviderId in src/media/models.ts). Persisted to
+   * localStorage AND pushed to the daemon via PUT /api/media/config so
+   * the daemon can dispatch real OpenAI / Volcengine calls.
+   */
+  mediaProviders?: Record<string, MediaProviderCredentials>;
 }
 
 export type AgentEvent =

@@ -138,15 +138,45 @@ substitution. Do not silently fall back.
    short, descriptive ones (\`hero-shot.png\`, \`intro-jingle.mp3\`,
    \`teaser-15s.mp4\`) so the user's file list stays readable.
 
-### Stub-provider note
+### Detecting and surfacing provider errors
 
-The provider integrations behind specific models (gpt-image-2,
-seedance-2, suno-v5, …) may still be stubs in this build. By default the
-dispatcher returns \`503 provider not configured\` for those models so
-the user doesn't get a "successful" placeholder file by accident. When
-\`OD_MEDIA_ALLOW_STUBS=1\` is set the dispatcher writes a labelled
-placeholder instead and prepends \`[stub]\` to the \`providerNote\`
-field — surface that note in your reply so the user knows the bytes
-aren't a real generation. The contract you follow is the same either
-way; the bytes get sharper as real provider integrations land.
+Today the dispatcher ships two real provider integrations: \`openai\`
+(image, with Azure OpenAI auto-detected from the configured base URL)
+and \`volcengine\` (Doubao Seedance video / Seedream image). Other
+providers (suno-v5, kling, fishaudio, …) are still stubs.
+
+The dispatcher tags every outcome explicitly. Treat the failure
+signals below as hard errors and surface them verbatim to the user —
+do **not** narrate a stub as if it were the final result.
+
+1. **HTTP status.** When stubs are disabled (the default release-build
+   posture), the dispatcher returns \`503 provider not configured\` for
+   models without a real renderer, and the CLI prints the daemon's
+   error message. Set \`OD_MEDIA_ALLOW_STUBS=1\` to write a labelled
+   placeholder instead.
+2. **Exit code.** \`od media generate\` exits \`0\` on real success, \`5\`
+   when the daemon accepted the request but the provider call failed
+   (key missing / 4xx / network blip), and \`1–4\` for client / daemon
+   errors. Always check \`$?\` before describing the output.
+3. **stderr WARN lines.** On exit \`5\` the CLI prints multiple
+   \`WARN: …\` lines explaining the failure (provider, reason, the
+   bytes-written stub size). Quote the reason in your reply.
+4. **Response JSON.** The single-line stdout JSON also carries
+   \`file.providerError\` (string) and \`file.usedStubFallback\` (bool)
+   when a fallback happened, plus \`file.intentionalStub\` (bool) when
+   no real renderer is wired up for that provider yet. If
+   \`providerError\` is non-null, tell the user the call failed, point
+   them at Settings → Media to fix the credential, and offer to retry
+   once they confirm.
+5. **Tiny placeholder PNGs (~67 bytes) / \`[stub]\` providerNote.** A
+   1×1 transparent PNG plus a \`providerNote\` that starts with
+   \`[stub]\` is the placeholder renderer's signature. If you see one,
+   either the integration is pending (\`intentionalStub: true\`) or the
+   provider call failed (\`providerError\` non-null) — surface that
+   distinction in your reply.
+
+A few surfaces (audio, some long-tail image/video providers) are still
+intentional stubs. In that case you can narrate the placeholder as
+expected, but still mention to the user that the real provider
+integration hasn't landed.
 `;
