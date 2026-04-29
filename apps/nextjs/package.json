@@ -3,8 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "./dist/sidecar/index.js",
+  "exports": {
+    "./sidecar": {
+      "default": "./dist/sidecar/index.js"
+    },
+    "./sidecar/server": {
+      "default": "./dist/sidecar/server.js"
+    }
+  },
+  "files": [
+    ".next",
+    "app",
+    "dist",
+    "next-env.d.ts",
+    "next.config.ts"
+  ],
   "scripts": {
-    "build": "next build",
+    "build": "next build && node ./esbuild.config.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -17,6 +33,7 @@
     "@types/node": "24.12.2",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
+    "esbuild": "0.27.7",
     "typescript": "6.0.3"
   },
   "engines": {

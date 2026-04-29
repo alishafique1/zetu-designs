@@ -10,6 +10,7 @@ const buildTargets = [
   "packages/platform",
   "packages/sidecar",
   "tools/dev",
+  "tools/pack",
 ];
 
 function resolvePackageManagerInvocation() {

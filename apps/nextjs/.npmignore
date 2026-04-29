@@ -1,0 +1,6 @@
+.next/cache
+.next/dev
+.next/diagnostics
+.next/trace*
+node_modules
+tsconfig.tsbuildinfo

@@ -1,5 +1,7 @@
+import { realpathSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { app, BrowserWindow } from "electron";
 
@@ -33,6 +35,21 @@ type DesktopRuntime = {
   screenshot(input: DesktopScreenshotInput): Promise<DesktopScreenshotResult>;
   status(): DesktopStatusSnapshot;
 };
+
+export type DesktopMainOptions = {
+  beforeShutdown?: () => Promise<void>;
+};
+
+function isDirectEntry(): boolean {
+  const entryPath = process.argv[1];
+  if (entryPath == null || entryPath.length === 0 || entryPath.startsWith("--")) return false;
+
+  try {
+    return realpathSync(entryPath) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
 
 function createPendingHtml(): string {
   return `data:text/html;charset=utf-8,${encodeURIComponent(`<!doctype html>
@@ -198,7 +215,10 @@ async function createDesktopRuntime(runtime: SidecarRuntimeContext): Promise<Des
   };
 }
 
-async function runDesktopMain(runtime: SidecarRuntimeContext): Promise<void> {
+export async function runDesktopMain(
+  runtime: SidecarRuntimeContext,
+  options: DesktopMainOptions = {},
+): Promise<void> {
   await app.whenReady();
 
   const desktop = await createDesktopRuntime(runtime);
@@ -208,6 +228,9 @@ async function runDesktopMain(runtime: SidecarRuntimeContext): Promise<void> {
   async function shutdown(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
+    await options.beforeShutdown?.().catch((error: unknown) => {
+      console.error("desktop beforeShutdown failed", error);
+    });
     await ipcServer?.close().catch(() => undefined);
     await desktop.close().catch(() => undefined);
     app.quit();
@@ -249,11 +272,13 @@ async function runDesktopMain(runtime: SidecarRuntimeContext): Promise<void> {
   }
 }
 
-const runtime = bootstrapSidecarRuntime(process.argv.slice(2), process.env, {
-  appKey: APP_KEYS.DESKTOP,
-});
+if (isDirectEntry()) {
+  const runtime = bootstrapSidecarRuntime(process.argv.slice(2), process.env, {
+    appKey: APP_KEYS.DESKTOP,
+  });
 
-void runDesktopMain(runtime).catch((error: unknown) => {
-  console.error(error instanceof Error ? error.stack || error.message : String(error));
-  process.exit(1);
-});
+  void runDesktopMain(runtime).catch((error: unknown) => {
+    console.error(error instanceof Error ? error.stack || error.message : String(error));
+    process.exit(1);
+  });
+}

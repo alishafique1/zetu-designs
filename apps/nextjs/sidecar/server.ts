@@ -1,7 +1,8 @@
 import { createServer as createHttpServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import type { AddressInfo } from "node:net";
-import { resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -27,7 +28,23 @@ export type NextjsSidecarHandle = {
 };
 
 function resolveNextjsRoot(): string {
-  return resolve(fileURLToPath(new URL("..", import.meta.url)));
+  let current = dirname(fileURLToPath(import.meta.url));
+
+  for (let depth = 0; depth < 8; depth += 1) {
+    try {
+      const packageJson = JSON.parse(readFileSync(join(current, "package.json"), "utf8")) as { name?: unknown };
+      if (packageJson.name === "@open-design/nextjs") return current;
+    } catch {
+      // Keep walking until the package root is found. This must work from both
+      // sidecar/*.ts under tsx and dist/sidecar/*.js in packaged installs.
+    }
+
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  throw new Error("failed to resolve @open-design/nextjs package root");
 }
 
 function parsePort(value: string | undefined): number {
