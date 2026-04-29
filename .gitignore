@@ -38,3 +38,8 @@ tsconfig.tsbuildinfo
 
 # Commander task scratchpad; keep local task notes out of git by default.
 .task/
+.env
+.env.local
+.env.*
+.env.example
+!.env.example

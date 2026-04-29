@@ -5,7 +5,7 @@ import { I18nProvider } from '../src/i18n';
 import '../src/index.css';
 
 export const metadata: Metadata = {
-  title: 'Social Dots Design Studio',
+  title: 'Zetu Designs',
   icons: {
     icon: '/logo.svg',
     // Safari pinned-tab mask icon — Next.js's Metadata API doesn't have a

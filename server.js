@@ -1,5 +1,5 @@
 // ============================================================
-// Social Dots Design Studio — Production Server
+// Zetu Designs — Production Server
 // Express backend: serves Vite static build + API
 // Multi-user via Clerk, AI via Anthropic streaming SSE
 // ============================================================
@@ -1003,6 +1003,6 @@ app.get('*', (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Social Dots Design Studio running on port ${PORT}`);
+  console.log(`Zetu Designs running on port ${PORT}`);
   console.log(`Next.js standalone proxy on port ${NEXTJS_PORT}`);
 });

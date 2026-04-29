@@ -37,13 +37,13 @@ export const en: Dict = {
   'common.daysShort': '{n}d',
   'common.untitled': 'Untitled',
 
-  'app.brand': 'Social Dots Design Studio',
+  'app.brand': 'Zetu Designs',
   'app.brandPill': 'AI Design Studio',
-  'app.brandSubtitle': 'by Social Dots',
+  'app.brandSubtitle': 'by Zetu',
   'app.welcomeLoading': 'Loading workspace…',
 
   'settings.welcomeKicker': 'Welcome',
-  'settings.welcomeTitle': 'Set up Social Dots Design Studio',
+  'settings.welcomeTitle': 'Set up Zetu Designs',
   'settings.welcomeSubtitle':
     "Pick how you'd like to run generations. You can change this any time from the Settings button in the top bar.",
   'settings.kicker': 'Settings',

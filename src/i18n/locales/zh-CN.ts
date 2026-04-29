@@ -37,13 +37,13 @@ export const zhCN: Dict = {
   'common.daysShort': '{n}天',
   'common.untitled': '未命名',
 
-  'app.brand': 'Social Dots 设计工作室',
+  'app.brand': 'Zetu 设计工作室',
   'app.brandPill': 'AI 设计工作室',
-  'app.brandSubtitle': 'by Social Dots',
+  'app.brandSubtitle': 'by Zetu',
   'app.welcomeLoading': '正在加载工作区…',
 
   'settings.welcomeKicker': '欢迎',
-  'settings.welcomeTitle': '设置 Social Dots 设计工作室',
+  'settings.welcomeTitle': '设置 Zetu 设计工作室',
   'settings.welcomeSubtitle':
     '选择你希望使用的执行方式。后续可以随时从顶部「设置」按钮中修改。',
   'settings.kicker': '设置',
