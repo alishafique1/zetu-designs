@@ -1,6 +1,6 @@
 import type { AppConfig } from '../types';
 
-const STORAGE_KEY = 'open-design:config';
+const STORAGE_KEY = 'social-dots-design-studio:config';
 
 export const DEFAULT_CONFIG: AppConfig = {
   mode: 'daemon',

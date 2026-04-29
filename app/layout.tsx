@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
+import { ClerkProvider } from '@clerk/nextjs';
 import { I18nProvider } from '../src/i18n';
 import '../src/index.css';
 
 export const metadata: Metadata = {
-  title: 'Open Design',
+  title: 'Social Dots Design Studio',
   icons: {
     icon: '/logo.svg',
     // Safari pinned-tab mask icon — Next.js's Metadata API doesn't have a
@@ -20,10 +21,12 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang='en'>
-      <body>
-        <I18nProvider>{children}</I18nProvider>
-      </body>
-    </html>
+    <ClerkProvider>
+      <html lang='en'>
+        <body>
+          <I18nProvider>{children}</I18nProvider>
+        </body>
+      </html>
+    </ClerkProvider>
   );
 }

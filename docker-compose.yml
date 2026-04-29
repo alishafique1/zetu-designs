@@ -1,0 +1,57 @@
+version: '3.9'
+
+services:
+  # ---- PostgreSQL database ----
+  db:
+    image: postgres:16-alpine
+    container_name: social-dots-studio-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: social_dots_studio
+      POSTGRES_USER: studio_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-in-production}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U studio_user -d social_dots_studio']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ---- Social Dots Design Studio app ----
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: social-dots-studio-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://studio_user:${POSTGRES_PASSWORD:-change-me-in-production}@db:5432/social_dots_studio
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_PRO_PRICE_ID: ${STRIPE_PRO_PRICE_ID}
+      STRIPE_STARTER_PRICE_ID: ${STRIPE_STARTER_PRICE_ID}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      CLERK_WEBHOOK_SECRET: ${CLERK_WEBHOOK_SECRET}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+    ports:
+      - '3000:3000'
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/api/health || exit 1']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  db_data:
+    driver: local

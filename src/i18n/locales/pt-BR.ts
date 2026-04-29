@@ -37,13 +37,13 @@ export const ptBR: Dict = {
   'common.daysShort': '{n} d',
   'common.untitled': 'Sem título',
 
-  'app.brand': 'Open Design',
-  'app.brandPill': 'Prévia de pesquisa',
-  'app.brandSubtitle': 'por Nexu Labs',
+  'app.brand': 'Social Dots Design Studio',
+  'app.brandPill': 'Estúdio de Design AI',
+  'app.brandSubtitle': 'by Social Dots',
   'app.welcomeLoading': 'Carregando área de trabalho…',
 
   'settings.welcomeKicker': 'Bem-vindo',
-  'settings.welcomeTitle': 'Configure o Open Design',
+  'settings.welcomeTitle': 'Configure o Social Dots Design Studio',
   'settings.welcomeSubtitle':
     'Escolha como você quer executar as gerações. Você pode mudar isso a qualquer momento no botão Configurações da barra superior.',
   'settings.kicker': 'Configurações',

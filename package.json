@@ -1,10 +1,10 @@
 {
-  "name": "open-design",
+  "name": "social-dots-design-studio",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@9.15.9",
   "type": "module",
-  "description": "Local-first design product: detects your installed code-agent CLI, runs design skills + design systems, streams artifacts into a sandboxed preview.",
+  "packageManager": "pnpm@9.15.9",
+  "description": "Social Dots Design Studio — AI-powered design artifact generator powered by Claude Code, Codex, and more.",
   "license": "Apache-2.0",
   "bin": {
     "od": "./daemon/cli.js"
@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",
+    "@clerk/nextjs": "^7.2.8",
     "better-sqlite3": "^11.10.0",
     "express": "^4.19.2",
     "jszip": "^3.10.1",
