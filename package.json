@@ -28,13 +28,17 @@
     "@anthropic-ai/sdk": "^0.32.1",
     "@clerk/clerk-sdk-node": "^5.1.6",
     "@clerk/nextjs": "^7.2.8",
+    "@supabase/supabase-js": "^2.49.0",
     "better-sqlite3": "^11.10.0",
     "express": "^4.19.2",
     "jszip": "^3.10.1",
     "multer": "^1.4.5-lts.1",
     "next": "^16.2.4",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "stripe": "^17.7.0",
+    "svix": "^1.64.0",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

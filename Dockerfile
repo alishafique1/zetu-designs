@@ -31,8 +31,17 @@ COPY --from=builder /app/public ./public/
 
 # Copy Express API server
 COPY server.js ./server.js
-COPY src/providers/ src/providers/
-COPY src/artifacts/ src/artifacts/
+
+# Copy .env as .env.production for runtime use
+COPY .env .env.production
+
+# Copy skills/ and design-systems/ directories needed by server.js API routes
+COPY skills/ ./skills/
+COPY design-systems/ ./design-systems/
+
+# Copy src/providers/ and src/artifacts/ (used by server.js)
+COPY src/providers/ ./src/providers/
+COPY src/artifacts/ ./src/artifacts/
 
 RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
 USER nodejs
