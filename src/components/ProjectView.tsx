@@ -712,6 +712,7 @@ export function ProjectView({
           <div className="topbar-title">
             <span
               className="title editable"
+              data-testid="project-title"
               tabIndex={0}
               role="textbox"
               suppressContentEditableWarning
@@ -726,7 +727,7 @@ export function ProjectView({
             >
               {project.name}
             </span>
-            <span className="meta">{projectMeta}</span>
+            <span className="meta" data-testid="project-meta">{projectMeta}</span>
           </div>
         </div>
         <div className="topbar-right">

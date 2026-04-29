@@ -319,7 +319,7 @@ export function FileWorkspace({
   const activeSketch = activeFile && isActiveSketch ? sketches[activeFile.name] : null;
 
   return (
-    <div className="workspace">
+    <div className="workspace" data-testid="file-workspace">
       <div className="ws-tabs-bar" role="tablist" aria-label={t('workspace.designFiles')}>
         <button
           type="button"
@@ -327,6 +327,7 @@ export function FileWorkspace({
           role="tab"
           aria-selected={activeTab === DESIGN_FILES_TAB}
           tabIndex={0}
+          data-testid="design-files-tab"
           onClick={() => setActiveTab(DESIGN_FILES_TAB)}
           title={t('workspace.designFiles')}
         >
@@ -412,7 +413,12 @@ export function FileWorkspace({
       <input
         ref={fileInputRef}
         type="file"
+<<<<<<< HEAD
         multiple
+=======
+        data-testid="design-files-upload-input"
+        accept="image/*"
+>>>>>>> a452098 (test: add e2e ui automation suite)
         style={{ display: 'none' }}
         onChange={handleFilePicked}
       />

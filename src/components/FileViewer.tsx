@@ -609,6 +609,7 @@ function HtmlViewer({
           >
             <iframe
               ref={iframeRef}
+              data-testid="artifact-preview-frame"
               title={file.name}
               sandbox="allow-scripts"
               srcDoc={srcDoc}

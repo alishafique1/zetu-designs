@@ -141,7 +141,12 @@ export function DesignFilesPanel({
               <Icon name="copy" size={13} />
               <span>{t('designFiles.paste.label')}</span>
             </button>
-            <button type="button" onClick={onUpload} title={t('designFiles.upload.title')}>
+            <button
+              type="button"
+              data-testid="design-files-upload-trigger"
+              onClick={onUpload}
+              title={t('designFiles.upload.title')}
+            >
               <Icon name="upload" size={13} />
               <span>{t('designFiles.upload.label')}</span>
             </button>
@@ -163,6 +168,7 @@ export function DesignFilesPanel({
                     <button
                       key={f.name}
                       type="button"
+                      data-testid={`design-file-row-${f.name}`}
                       className={`df-row ${active ? 'active' : ''}`}
                       onMouseEnter={() => setHover(f.name)}
                       onMouseLeave={() => setHover((c) => (c === f.name ? null : c))}
@@ -178,6 +184,7 @@ export function DesignFilesPanel({
                       </span>
                       <span className="df-row-time">{relativeTime(f.mtime, t)}</span>
                       <span
+                        data-testid={`design-file-menu-${f.name}`}
                         className="df-row-menu"
                         style={isHovered || active ? { opacity: 1 } : undefined}
                         role="button"
@@ -239,6 +246,7 @@ export function DesignFilesPanel({
       ) : null}
       {menuPos ? (
         <div
+          data-testid="design-file-menu-popover"
           className="df-row-popover"
           style={{ top: menuPos.top, left: menuPos.left }}
           onMouseDown={(e) => e.stopPropagation()}
@@ -265,6 +273,7 @@ export function DesignFilesPanel({
           <button
             type="button"
             className="danger"
+            data-testid={`design-file-delete-${menuPos.name}`}
             onClick={() => {
               const name = menuPos.name;
               setMenuPos(null);
@@ -315,7 +324,7 @@ function DfPreview({
           </div>
         )}
       </div>
-      <div className="df-preview-meta">
+      <div className="df-preview-meta" data-testid="design-file-preview">
         <button
           type="button"
           className="ghost"

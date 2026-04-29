@@ -15,6 +15,9 @@
     "dev:all": "node scripts/dev-all.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "test:ui:clean": "node scripts/reset-e2e-artifacts.mjs",
+    "test:ui": "npm run test:ui:clean && playwright test -c e2e/playwright.config.ts",
+    "test:ui:headed": "npm run test:ui:clean && playwright test -c e2e/playwright.config.ts --headed",
     "typecheck": "tsc -b --noEmit",
     "start": "npm run build && node daemon/cli.js"
   },
@@ -27,6 +30,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
