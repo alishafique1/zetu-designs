@@ -94,7 +94,7 @@ function isValidUUID(id) {
   return uuidValidate(id) && uuidVersion(id) === 4;
 }
 
-// Auth middleware: verifies Clerk JWT from Authorization: Bearer <token>
+// Auth middleware: verifies Clerk JWT from Authorization: Bearer ***
 // Sets req.userId (internal UUID) and req.clerkUserId (Clerk ID)
 async function requireAuth(req, res, next) {
   const header = req.headers['authorization'] || req.headers['Authorization'];
@@ -125,6 +125,23 @@ async function requireAuth(req, res, next) {
     console.error('[auth] verifyToken failed:', err.message);
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
+}
+
+// Internal API key auth — for server-to-server / agent calls
+// Uses X-API-Key header. Bypasses Clerk + user lookup.
+// Sets req.userId to a special internal system user or a designated agent user.
+async function requireInternalAuth(req, res, next) {
+  const apiKey = req.headers['x-api-key'];
+  const expected = process.env.INTERNAL_API_KEY;
+  if (!apiKey || !expected || apiKey !== expected) {
+    return res.status(401).json({ error: 'Invalid or missing X-API-Key' });
+  }
+  // Internal callers are trusted — use a system user ID for metering
+  // If a userId is passed, use it; otherwise create/anonymous session
+  const callerUserId = req.headers['x-user-id'];
+  req.userId = callerUserId || '00000000-0000-0000-0000-000000000000';
+  req.internalAuth = true;
+  next();
 }
 
 // ---------------------------------------------------------------------------
@@ -1216,6 +1233,131 @@ app.post('/api/chat', requireAuth, async (req, res) => {
         .catch(() => {});
     }
 
+  } catch (err) {
+    sendError(String(err));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// /api/v1/chat — internal streaming endpoint for agents / server-to-server
+// Auth: X-API-Key header (bypasses Clerk)
+// Use this from n8n, Hermes, or any internal agent
+// ---------------------------------------------------------------------------
+
+app.post('/api/v1/chat', requireInternalAuth, async (req, res) => {
+  const { message, systemPrompt, projectId, agentId, userId: targetUserId } = req.body;
+
+  // Override req.userId if a specific user is targeted
+  if (targetUserId) req.userId = targetUserId;
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  function send(event, data) {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  }
+  function sendError(msg) {
+    send('error', { message: msg });
+    res.end();
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    sendError('ANTHROPIC_API_KEY not configured on server');
+    return;
+  }
+
+  send('start', { bin: 'anthropic-api' });
+
+  try {
+    // Auto-create or reuse a project for internal calls
+    let projectUUID = projectId;
+    if (!projectUUID) {
+      const { data: existing } = await getSupabase()
+        .from('projects')
+        .select('id')
+        .eq('user_id', req.userId)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (existing) {
+        projectUUID = existing.id;
+      } else {
+        projectUUID = randomUUID();
+        await getSupabase().from('projects').insert({
+          id: projectUUID,
+          user_id: req.userId,
+          name: 'Internal Agent Session',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+      }
+    }
+
+    const model = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6';
+    const fullSystem = systemPrompt || 'You are a helpful AI assistant running on Zetu Designs. Be concise and helpful.';
+
+    const messages = [{ role: 'user', content: String(message) }];
+
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({ model, max_tokens: 8192, system: fullSystem, messages, stream: true }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      sendError(`Anthropic API ${response.status}: ${err}`);
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let accumulatedText = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || !trimmed.startsWith('data: ')) continue;
+        const jsonStr = trimmed.slice(6).trim();
+        if (jsonStr === '[DONE]') continue;
+
+        try {
+          const event = JSON.parse(jsonStr);
+          if (event.type === 'message_start') {
+            send('agent', { type: 'status', label: 'requesting', model: event.message?.model || model });
+          }
+          if (event.type === 'content_block_delta') {
+            if (event.delta?.type === 'text_delta' && event.delta?.text) {
+              accumulatedText += event.delta.text;
+              send('chunk', { text: event.delta.text, accumulated: accumulatedText });
+            }
+          }
+          if (event.type === 'message_delta' && event.usage) {
+            send('done', { text: accumulatedText, projectId: projectUUID, tokens: event.usage });
+          }
+        } catch {}
+      }
+    }
+
+    res.end();
   } catch (err) {
     sendError(String(err));
   }
