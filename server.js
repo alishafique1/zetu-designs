@@ -545,53 +545,219 @@ app.get('/api/design-systems/:id/showcase', (req, res) => {
 // Templates CRUD
 // ---------------------------------------------------------------------------
 
-app.get('/api/templates', async (_req, res) => {
+function toMillis(raw) {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string') {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Date.now();
+}
+
+function parseTemplateFiles(raw) {
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((f) => f && typeof f === 'object')
+      .map((f) => ({
+        name: String(f.name || ''),
+        content: String(f.content || ''),
+      }))
+      .filter((f) => f.name.length > 0);
+  }
+  if (typeof raw === 'string') {
+    try {
+      return parseTemplateFiles(JSON.parse(raw));
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function normalizeTemplate(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description || undefined,
+    sourceProjectId: row.source_project_id || undefined,
+    files: parseTemplateFiles(row.files_json),
+    createdAt: toMillis(row.created_at),
+  };
+}
+
+function shouldTemplateSnapshotFile(name) {
+  const lower = String(name).toLowerCase();
+  return (
+    lower.endsWith('.html') ||
+    lower.endsWith('.htm') ||
+    lower.endsWith('.txt') ||
+    lower.endsWith('.md') ||
+    lower.endsWith('.css') ||
+    lower.endsWith('.js') ||
+    lower.endsWith('.jsx') ||
+    lower.endsWith('.ts') ||
+    lower.endsWith('.tsx') ||
+    lower.endsWith('.json')
+  );
+}
+
+function snapshotProjectFiles(projectId) {
+  const dir = getProjectDir(projectId);
+  if (!existsSync(dir)) return [];
+  const out = [];
+  for (const name of readdirSync(dir)) {
+    if (!shouldTemplateSnapshotFile(name)) continue;
+    const fp = join(dir, name);
+    try {
+      const content = readFileSync(fp, 'utf8');
+      out.push({ name, content });
+    } catch {
+      // Skip unreadable or binary-ish files.
+    }
+  }
+  return out;
+}
+
+app.get('/api/templates', requireAuth, async (req, res) => {
   try {
-    const { data } = await getSupabase()
+    const { data, error } = await getSupabase()
       .from('templates')
       .select('*')
       .order('created_at', { ascending: false });
-    res.json({ templates: data || [] });
-  } catch {
+    if (error) throw error;
+
+    const rows = data || [];
+    const sourceIds = [
+      ...new Set(rows.map((r) => r.source_project_id).filter(Boolean)),
+    ];
+    if (sourceIds.length === 0) {
+      return res.json({ templates: rows.map(normalizeTemplate) });
+    }
+
+    const { data: owned, error: ownedErr } = await getSupabase()
+      .from('projects')
+      .select('id')
+      .eq('user_id', req.userId)
+      .in('id', sourceIds);
+    if (ownedErr) throw ownedErr;
+    const ownedIds = new Set((owned || []).map((p) => p.id));
+
+    const filtered = rows.filter((row) => {
+      if (!row.source_project_id) return false;
+      return ownedIds.has(row.source_project_id);
+    });
+    res.json({ templates: filtered.map(normalizeTemplate) });
+  } catch (err) {
+    console.error('[templates:list] failed:', err?.message || err);
     res.json({ templates: [] });
   }
 });
 
-app.get('/api/templates/:id', async (req, res) => {
+app.get('/api/templates/:id', requireAuth, async (req, res) => {
   try {
-    const { data } = await getSupabase()
+    const { data, error } = await getSupabase()
       .from('templates')
       .select('*')
       .eq('id', req.params.id)
       .single();
-    if (!data) return res.status(404).json({ error: 'not found' });
-    res.json({ template: data });
-  } catch {
+    if (error || !data) return res.status(404).json({ error: 'not found' });
+    if (!data.source_project_id) {
+      return res.status(404).json({ error: 'not found' });
+    }
+
+    const { data: project } = await getSupabase()
+      .from('projects')
+      .select('id')
+      .eq('id', data.source_project_id)
+      .eq('user_id', req.userId)
+      .single();
+    if (!project) return res.status(404).json({ error: 'not found' });
+    res.json({ template: normalizeTemplate(data) });
+  } catch (err) {
+    console.error('[templates:get] failed:', err?.message || err);
     res.status(404).json({ error: 'not found' });
   }
 });
 
 app.post('/api/templates', requireAuth, async (req, res) => {
-  const { name, description, source_project_id } = req.body;
+  const { name, description } = req.body || {};
+  const sourceProjectId =
+    req.body?.sourceProjectId || req.body?.source_project_id;
   if (!name) return res.status(400).json({ error: 'name required' });
+  if (!sourceProjectId) {
+    return res.status(400).json({ error: 'sourceProjectId required' });
+  }
 
   try {
-    const { data } = await getSupabase()
-      .from('templates')
-      .insert({ id: randomUUID(), name, description, source_project_id, files_json: '{}' })
-      .select()
+    const { data: project } = await getSupabase()
+      .from('projects')
+      .select('id')
+      .eq('id', sourceProjectId)
+      .eq('user_id', req.userId)
       .single();
-    res.status(201).json({ template: data });
-  } catch {
+    if (!project) {
+      return res.status(404).json({ error: 'source project not found' });
+    }
+
+    const files = snapshotProjectFiles(sourceProjectId);
+    const now = new Date().toISOString();
+    const insertBase = {
+      id: randomUUID(),
+      name,
+      description: description || null,
+      source_project_id: sourceProjectId,
+      files_json: JSON.stringify(files),
+      created_at: now,
+    };
+
+    // Prefer explicit ownership when the schema has user_id; gracefully
+    // fall back for older schemas where templates.user_id does not exist.
+    let inserted = null;
+    let insertError = null;
+    ({ data: inserted, error: insertError } = await getSupabase()
+      .from('templates')
+      .insert({ ...insertBase, user_id: req.userId })
+      .select()
+      .single());
+    if (insertError && insertError.code === 'PGRST204') {
+      ({ data: inserted, error: insertError } = await getSupabase()
+        .from('templates')
+        .insert(insertBase)
+        .select()
+        .single());
+    }
+    if (insertError || !inserted) {
+      throw insertError || new Error('template insert failed');
+    }
+    res.status(201).json({ template: normalizeTemplate(inserted) });
+  } catch (err) {
+    console.error('[templates:create] failed:', err?.message || err);
     res.status(500).json({ error: 'insert failed' });
   }
 });
 
 app.delete('/api/templates/:id', requireAuth, async (req, res) => {
   try {
+    const { data: tpl } = await getSupabase()
+      .from('templates')
+      .select('id, source_project_id')
+      .eq('id', req.params.id)
+      .single();
+    if (!tpl || !tpl.source_project_id) {
+      return res.status(404).json({ error: 'not found' });
+    }
+    const { data: project } = await getSupabase()
+      .from('projects')
+      .select('id')
+      .eq('id', tpl.source_project_id)
+      .eq('user_id', req.userId)
+      .single();
+    if (!project) return res.status(404).json({ error: 'not found' });
+
     await getSupabase().from('templates').delete().eq('id', req.params.id);
     res.json({ ok: true });
-  } catch {
+  } catch (err) {
+    console.error('[templates:delete] failed:', err?.message || err);
     res.status(500).json({ error: 'delete failed' });
   }
 });
@@ -630,11 +796,24 @@ app.get('/api/projects/:id', requireAuth, async (req, res) => {
 });
 
 app.post('/api/projects', requireAuth, async (req, res) => {
-  const { id, name, skill_id, design_system_id, pending_prompt, metadata } = req.body;
+  const {
+    id,
+    name,
+    skill_id,
+    skillId,
+    design_system_id,
+    designSystemId,
+    pending_prompt,
+    pendingPrompt,
+    metadata,
+  } = req.body || {};
   if (!name) return res.status(400).json({ error: 'name required' });
 
   const now = new Date().toISOString();
   const projectId = id || randomUUID();
+  const effectiveSkillId = skill_id ?? skillId ?? null;
+  const effectiveDesignSystemId = design_system_id ?? designSystemId ?? null;
+  const effectivePendingPrompt = pending_prompt ?? pendingPrompt ?? null;
 
   try {
     const { data } = await getSupabase()
@@ -643,9 +822,9 @@ app.post('/api/projects', requireAuth, async (req, res) => {
         id: projectId,
         user_id: req.userId,
         name,
-        skill_id,
-        design_system_id,
-        pending_prompt,
+        skill_id: effectiveSkillId,
+        design_system_id: effectiveDesignSystemId,
+        pending_prompt: effectivePendingPrompt,
         metadata_json: metadata ? JSON.stringify(metadata) : null,
         created_at: now,
         updated_at: now,
@@ -663,6 +842,33 @@ app.post('/api/projects', requireAuth, async (req, res) => {
         created_at: now,
         updated_at: now,
       });
+
+    // If this project was created from a saved template, hydrate the
+    // project's working directory with the template snapshot files.
+    if (
+      metadata &&
+      typeof metadata === 'object' &&
+      metadata.kind === 'template' &&
+      typeof metadata.templateId === 'string'
+    ) {
+      const { data: tpl } = await getSupabase()
+        .from('templates')
+        .select('files_json')
+        .eq('id', metadata.templateId)
+        .single();
+      const files = parseTemplateFiles(tpl?.files_json);
+      if (files.length > 0) {
+        const dir = getProjectDir(projectId);
+        mkdirSync(dir, { recursive: true });
+        for (const f of files) {
+          try {
+            writeFileSync(join(dir, f.name), f.content, 'utf8');
+          } catch {
+            // Skip file-level failures and continue seeding.
+          }
+        }
+      }
+    }
 
     res.status(201).json({ project: data, conversationId: 'main' });
   } catch (err) {

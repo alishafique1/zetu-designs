@@ -1,340 +1,271 @@
-# Architecture
+# Zetu Designs — Multi-User SaaS Architecture
 
-**Parent:** [`spec.md`](spec.md) · **Siblings:** [`skills-protocol.md`](skills-protocol.md) · [`agent-adapters.md`](agent-adapters.md) · [`modes.md`](modes.md)
+## Business Model
 
-This doc describes the system topology, runtime modes, data flow, and file layout. Design rationale lives in [`spec.md`](spec.md); protocol details for skills and agent adapters live in their own docs.
+### Mode 1: BYOK (Bring Your Own Key)
+- User provides their own Anthropic API key (encrypted at rest)
+- All AI calls route through their key
+- Platform charges **5% platform fee** on their actual token costs
+- Cost = traced via `usage` in Anthropic `/v1/messages` response
+- Billed monthly via Stripe invoice
 
-[ocod]: https://github.com/OpenCoworkAI/open-codesign
-[acd]: https://github.com/VoltAgent/awesome-claude-design
-[piai]: https://github.com/mariozechner/pi-ai
-[guizang]: https://github.com/op7418/guizang-ppt-skill
+### Mode 2: Zetu Platform Tokens (default)
+- User does NOT provide a key → uses Zetu's platform key
+- Generations limited by subscription tier
+- Tiers: **Free** (10 gens/mo), **Starter** ($29/mo, 100 gens), **Pro** ($79/mo, 500 gens)
+- Overage: $0.10 per generation
+
+### Switching
+- User can toggle between BYOK and Zetu modes at any time
+- Changing from BYOK to Zetu: activate subscription immediately
+- Changing from Zetu to BYOK: retain Zetu tokens until month end
 
 ---
 
-## 1. Three deployment topologies
+## Auth Flow
 
-OD is a web app plus a local daemon. The split means the same UI can run in three shapes:
+1. User signs up/in via **Clerk** (already installed — `<ClerkProvider>` in `app/layout.tsx`)
+2. Clerk fires `user.created`/`user.updated` webhook → server upserts `users` table
+3. Frontend gets Clerk session token: `const token = await getToken({ template: "ZGV0YWlscyIgLSB7e21vZHVsZXN9fQ==" })` or `auth().getToken()`
+4. Every API call includes: `Authorization: Bearer <clerk_session_token>`
+5. Express middleware (`requireAuth`) verifies token, looks up `users.id` from `users.clerk_id`
+6. `req.userId` (internal UUID) used for all DB queries — never Clerk ID directly
 
-### Topology A — Fully local (the default)
+---
 
-```
-┌────────────────── user's machine ──────────────────┐
-│                                                    │
-│   browser ──► Next.js dev server (localhost:3000)  │
-│                       │                            │
-│                       │ ws://localhost:7431        │
-│                       ▼                            │
-│            od daemon (Node, long-running)         │
-│                       │                            │
-│                       ▼                            │
-│            spawns: claude / codex / cursor / …     │
-└────────────────────────────────────────────────────┘
-```
+## Database Schema (PostgreSQL / Supabase)
 
-One `pnpm dev` starts both the Next.js app and the daemon (via a predev script). Zero config. No accounts.
+### New Tables
 
-### Topology B — Web on Vercel + daemon on user's machine
+```sql
+-- Per-user API key (AES-256-GCM encrypted)
+CREATE TABLE user_api_keys (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  provider        TEXT NOT NULL CHECK (provider IN ('anthropic', 'openai')),
+  encrypted_key   TEXT NOT NULL,  -- AES-256-GCM encrypted
+  key_hash        TEXT NOT NULL,  -- SHA-256 of plaintext for lookup
+  is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id, provider)
+);
 
-```
-browser ──► od.yourdomain.com (Vercel)
-              │
-              │ ws(s):// user-provided URL (e.g. cloudflared tunnel)
-              ▼
-        od daemon on user's laptop
-              │
-              ▼
-        spawns: claude / codex / …
-```
+-- Monthly usage for BYOK billing
+CREATE TABLE monthly_usage (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  period          TEXT NOT NULL,  -- 'YYYY-MM' format
+  provider        TEXT NOT NULL,
+  input_tokens    BIGINT NOT NULL DEFAULT 0,
+  output_tokens   BIGINT NOT NULL DEFAULT 0,
+  api_cost_cents  BIGINT NOT NULL DEFAULT 0,  -- in cents
+  platform_fee_cents BIGINT NOT NULL DEFAULT 0, -- 5% of api_cost_cents
+  generations     INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(user_id, period, provider)
+);
 
-The user runs `od daemon --expose` which prints a tunnel URL; they paste the URL into the deployed web app's "Connect daemon" screen. Daemon holds secrets; Vercel holds nothing sensitive.
+-- Zetu platform token ledger (for subscription enforcement)
+CREATE TABLE platform_usage (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  period          TEXT NOT NULL,  -- 'YYYY-MM'
+  plan            TEXT NOT NULL,  -- 'free' | 'starter' | 'pro'
+  generations_used INTEGER NOT NULL DEFAULT 0,
+  tokens_used     BIGINT NOT NULL DEFAULT 0,
+  UNIQUE(user_id, period)
+);
 
-### Topology C — Web on Vercel + direct API (no daemon)
+-- Platform API keys (Zetu's own keys, one per environment)
+CREATE TABLE platform_api_keys (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name        TEXT NOT NULL,  -- 'production' | 'staging'
+  provider    TEXT NOT NULL,
+  encrypted_key TEXT NOT NULL,
+  is_active   BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
-```
-browser ──► od.yourdomain.com (Vercel serverless)
-                       │
-                       ▼
-              Anthropic Messages API (BYOK stored in browser)
-```
-
-No local CLI, no daemon. Degraded experience — no Claude Code skills, no filesystem artifacts (stored in IndexedDB), no PPTX export. But it's the "just try it" path. Keys stored `localStorage` with explicit warning.
-
-The three topologies share the same web bundle; the difference is which transports are enabled.
-
-## 2. Component diagram (logical)
-
-```
-┌─────────────────────────────── Web App ─────────────────────────────┐
-│                                                                     │
-│  ┌──────────┐  ┌─────────────┐  ┌───────────┐  ┌────────────────┐  │
-│  │ chat pane│  │ artifact    │  │ preview   │  │ comment /      │  │
-│  │          │  │ tree        │  │ iframe    │  │ slider overlay │  │
-│  └────┬─────┘  └──────┬──────┘  └─────┬─────┘  └────────┬───────┘  │
-│       │               │               │                  │           │
-│       └─────────── session bus (in-memory) ──────────────┘           │
-│                        │                                             │
-│                        ▼                                             │
-│              Transport layer (ws-rpc | http-direct | indexeddb)      │
-└─────────────────────────┬───────────────────────────────────────────┘
-                          │
-  ┌───────────────────────┴────────────────────────────────┐
-  │                                                        │
-  ▼ (topology A/B)                                         ▼ (topology C)
-┌─────────────────────── Daemon ───────────────────────┐  ┌────────────┐
-│                                                      │  │ browser-   │
-│  session manager      skill registry                 │  │ only       │
-│  agent adapter pool   design-system resolver         │  │ runtime    │
-│  artifact store       preview compile pipeline       │  │ (limited)  │
-│  export pipeline      detection service              │  └────────────┘
-│                                                      │
-└─┬────────────────────────────────────────────────┬───┘
-  │                                                │
-  ▼                                                ▼
-┌─ agent CLIs ─┐                           ┌─ filesystem ─┐
-│ claude       │                           │ ./.od/      │
-│ codex        │                           │ ~/.od/      │
-│ cursor-agent │                           │ skills/      │
-│ gemini       │                           │ DESIGN.md    │
-│ opencode     │                           └──────────────┘
-│ openclaw     │
-└──────────────┘
+-- Invoice line items (BYOK monthly billing)
+CREATE TABLE invoices (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  stripe_invoice_id TEXT UNIQUE,
+  period          TEXT NOT NULL,
+  amount_cents    BIGINT NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 ```
 
-## 3. Key components
+### Updated Tables
 
-### 3.1 Web app (Next.js 15, App Router)
+```sql
+-- users: add billing fields
+ALTER TABLE users ADD COLUMN IF NOT EXISTS platform_mode TEXT NOT NULL DEFAULT 'zetu';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'free' CHECK (plan IN ('free', 'starter', 'pro'));
+ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status TEXT DEFAULT 'inactive';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS generations_limit INTEGER NOT NULL DEFAULT 10;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS current_period_end TIMESTAMPTZ;
 
-- **Why Next.js, not Vite SPA?** We want SSR for the marketing landing page + serverless routes for Topology C's direct-API path + Vercel deployment as a first-class citizen. An SPA would need a separate server for any of that.
-- **State:** Zustand for session/artifact stores. Browser-side only; hydrated from daemon on connect.
-- **Iframe preview:** Vendored React 18 + Babel standalone for JSX artifacts, following [Open CoDesign][ocod]'s approach. HTML artifacts load raw. See [§5](#5-preview-renderer).
-- **Comment mode:** Click captures `[data-od-id]` on preview DOM, opens a popover, sends `{artifact_id, element_id, note}` to daemon → agent gets a surgical edit instruction.
-- **Slider UI:** When an agent emits a "tweak parameter" tool call (see [`skills-protocol.md`](skills-protocol.md) §4.2), the web app renders a live-update control that re-sends parameterized prompts without round-tripping the chat.
-
-### 3.2 Local daemon (`od daemon`)
-
-Single binary via `pkg` or a thin Node script distributed over npm. Responsibilities:
-
-- Listen on `ws://localhost:7431` (configurable). Accept JSON-RPC-over-WebSocket.
-- Maintain a **session** per web tab. Sessions hold: active agent, active skill, active artifact, in-flight tool calls, design-system reference.
-- Operate the **agent adapter pool**: one detected CLI = one adapter instance, reused across sessions.
-- Scan and index **skills** from `~/.claude/skills/`, `./skills/`, `./.claude/skills/` on startup and on FS-watch events.
-- Own the **artifact store** — writes files to disk, never in memory.
-- Run the **preview compile pipeline** (Babel transform for JSX, CSS inliner for HTML exports).
-- Spawn headless Chromium via Puppeteer for **PDF export**. PPTX via `pptxgenjs`.
-
-### 3.3 Agent adapter pool
-
-See [`agent-adapters.md`](agent-adapters.md) for the full interface. Each adapter:
-
-1. **Detects** its target CLI (PATH lookup + config-dir probe).
-2. **Spawns** the CLI with a standardized wrapper prompt + skill context + design-system context + CWD set to the project's artifact root.
-3. **Streams** stdout/stderr as structured events (JSON Lines if the CLI supports it; line-based parser otherwise).
-4. **Reports capabilities** — does it support multi-turn? Surgical edits? Native skill loading? Tool use?
-
-### 3.4 Skill registry
-
-See [`skills-protocol.md`](skills-protocol.md). Scans three locations and merges:
-
-| Source | Priority | Purpose |
-|---|---|---|
-| `./.claude/skills/` | highest | project-private skills |
-| `./skills/` | medium | project-declared skills |
-| `~/.claude/skills/` | lowest | user-global skills |
-
-Conflicts resolve by priority (higher wins). Each skill parsed once; watched for changes in dev.
-
-### 3.5 Design-system resolver
-
-- Looks for `./DESIGN.md` first, then `./design-system/DESIGN.md`, then user-configured path.
-- Parses the 9-section format (see [awesome-claude-design][acd] schema).
-- Injects as a prepended system message on every agent run, plus as a `{{ design_system }}` template variable skills can reference.
-- Hot-reloads on file change in dev.
-
-### 3.6 Artifact store
-
-Plain files on disk. Conventional layout per project:
-
-```
-./.od/
-├── config.json                  # project-level daemon config
-├── artifacts/
-│   ├── 2026-04-24T10-03-12-landing/
-│   │   ├── artifact.json        # metadata (skill, mode, prompt, parent)
-│   │   ├── index.html           # primary output (or .jsx, .md, .pptx.json)
-│   │   └── assets/              # skill-generated images, fonts, etc.
-│   └── …
-├── history.jsonl                # append-only action log (generations, edits, comments)
-└── sessions/
-    └── <session-id>.json        # transient; garbage-collected after 24h
+-- subscriptions: add more fields
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS generations_limit INTEGER NOT NULL DEFAULT 10;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS generations_used INTEGER NOT NULL DEFAULT 0;
 ```
 
-Rationale:
-- **Plain files** → users can `git add ./.od/artifacts/` and review designs in PRs.
-- **`artifact.json` metadata** → OD can reconstruct the artifact tree without a DB.
-- **`history.jsonl` not SQLite** → append-only, git-friendly, greppable. [Open CoDesign][ocod] uses SQLite; we deliberately don't.
-- **Sessions separate from artifacts** → sessions are ephemeral UI state; artifacts are durable.
+---
 
-### 3.7 Export pipeline
+## API Endpoints (server.js additions)
 
-| Format | How |
-|---|---|
-| HTML (self-contained) | Inline all CSS, rewrite asset URLs to data: URIs |
-| PDF | `puppeteer` → `page.pdf()` on the rendered HTML |
-| PPTX | `deck-skill` outputs a JSON intermediate (`slides.json`); `pptxgenjs` generates the `.pptx` |
-| ZIP | `archiver` over `artifacts/<id>/` |
-| Markdown | direct copy if artifact is `.md`, otherwise skill-defined render |
+### `GET /api/user/me`
+Returns current user profile: `{ id, email, plan, platform_mode, generations_used, generations_limit }`
 
-## 4. Data flow — a typical "generate prototype" turn
+### `POST /api/user/api-key`
+Body: `{ provider: 'anthropic', apiKey: 'sk-...' }`
+- Validates key by making a test `/v1/models` call
+- Encrypts with AES-256-GCM using `ENCRYPTION_KEY` env var
+- Stores `encrypted_key` and `key_hash` (SHA-256 of key for de-dup)
 
+### `DELETE /api/user/api-key`
+Removes the user's stored API key, reverts to Zetu platform mode.
+
+### `POST /api/user/platform-mode`
+Body: `{ mode: 'byok' | 'zetu' }`
+Switches billing mode. If switching to `zetu`, validates active subscription.
+
+### `GET /api/user/usage`
+Query: `?period=2026-04`
+Returns: `{ input_tokens, output_tokens, api_cost_cents, platform_fee_cents, generations }` for BYOK
+Or: `{ generations_used, generations_limit, plan }` for Zetu
+
+### `POST /api/chat` (modified)
+Before calling Anthropic:
+1. Check user's `platform_mode`
+2. **BYOK**: decrypt user's API key, call Anthropic directly
+3. **Zetu**: check `platform_usage.generations_used < generations_limit`, then call with Zetu's key
+4. After response: record tokens/generations in `monthly_usage` or `platform_usage`
+
+### `GET /api/billing/checkout`
+Creates Stripe checkout session for subscription. Query: `?plan=starter|pro`
+
+### `POST /api/billing/portal`
+Creates Stripe customer portal session for managing subscription.
+
+---
+
+## Stripe Integration
+
+### Products (create in Stripe dashboard)
+- **Zetu Free** — $0/mo, 10 gens/mo, no BYOK fee
+- **Zetu Starter** — $29/mo, 100 gens/mo
+- **Zetu Pro** — $79/mo, 500 gens/mo
+
+### BYOK Billing
+- No subscription needed
+- Usage accumulated in `monthly_usage` table
+- Every month 1st: create `invoices` record + trigger Stripe invoice for `platform_fee_cents`
+- OR: use Stripe metering (draft, requires Stripe dashboard setup)
+
+---
+
+## Key Implementation Details
+
+### API Key Encryption
 ```
-1. User types prompt in web chat.
-2. Web sends { method: "session.generate", params: {
-        sessionId, prompt, modeHint: "prototype"
-   }} to daemon via WS.
-
-3. Daemon:
-     a. picks active skill (prototype-skill)
-     b. loads design-system (DESIGN.md)
-     c. materializes a new artifact dir under ./.od/artifacts/<slug>/
-     d. invokes agent adapter with:
-          - system: skill's SKILL.md contents + DESIGN.md
-          - user: original prompt
-          - cwd: the new artifact dir
-     e. streams agent events back to web as they arrive:
-          - "tool_call" (edit file, write file, read file)
-          - "text_delta"
-          - "thinking" (if supported)
-
-4. Web shows:
-     - running tool-call feed in the side panel
-     - artifact tree updates as files materialize
-     - preview iframe loads the primary output file when agent signals "done"
-     - slider/comment overlay activates once preview loads
-
-5. On completion, daemon appends:
-     { ts, sessionId, artifactId, action: "generate", skill, promptHash }
-   to history.jsonl.
-
-6. User comments on an element → web sends { method: "session.refine", params: {
-        sessionId, artifactId, elementId, note }}
-
-7. Daemon re-invokes agent with surgical-edit instruction + the note.
-   Adapter translates based on capabilities:
-     - Claude Code → native tool loop, edits that region only
-     - Codex → regenerates the file with "only change element X" constraint
-     - API fallback → same as Codex path
-```
-
-## 5. Preview renderer
-
-**Constraints:**
-- Must isolate artifact code from the host app (no access to window, cookies, parent DOM).
-- Must hot-reload as the agent streams writes.
-- Must support both static HTML and JSX artifacts.
-
-**Design:**
-- Always an `<iframe sandbox="allow-scripts">` — no `allow-same-origin`.
-- Static HTML: `srcdoc` load of the inlined artifact.
-- JSX: inject a small bootstrap that imports vendored React 18 + Babel standalone, then dynamically evals the JSX as Babel-transformed code. (This is what [Open CoDesign][ocod] does, and it works; no reason to reinvent.)
-- Agent writes trigger a debounced rebuild + iframe `srcdoc` replace. Full reload each time — React state loss is acceptable at this scope.
-
-## 6. Config files
-
-| File | Purpose |
-|---|---|
-| `~/.open-design/config.toml` | daemon-global: default agent preference, keys (optional, BYOK), telemetry opt-in (default off) |
-| `~/.open-design/agents.json` | cached agent detection results |
-| `./.od/config.json` | project-local: active design system, preferred skills, preferred mode |
-| `./skills/<skill>/SKILL.md` | skill manifest (standard Claude Code format) |
-| `./DESIGN.md` | active design system ([awesome-claude-design][acd] format) |
-
-All config is plain text / TOML / JSON — no binary formats, no sqlite. Reviewable in PRs.
-
-## 7. Protocol between web and daemon
-
-JSON-RPC 2.0 over WebSocket. Why not REST? Because we need streaming. Why not gRPC? Over-engineering for a single-origin local app.
-
-Methods (MVP):
-
-```
-session.open(params) -> { sessionId }
-session.generate(params) -> streams: tool_call | text_delta | artifact_update | done
-session.refine(params) -> streams: same
-session.cancel(params) -> { ok }
-agents.list() -> [{ id, name, version, capabilities }]
-agents.setActive({ agentId }) -> { ok }
-skills.list() -> [{ id, name, mode, manifest }]
-skills.setActive({ sessionId, skillId }) -> { ok }
-skills.install({ source }) -> streams: progress
-design.setActive({ path }) -> { designSystem }
-artifacts.list({ projectRoot }) -> [Artifact]
-artifacts.get({ id }) -> Artifact
-artifacts.export({ id, format }) -> streams: progress | { url | path }
+Key: 32-byte key from ENCRYPTION_KEY env var (raw or base64)
+IV: random 12 bytes per encryption
+Cipher: AES-256-GCM
+Storage: base64(iv + ciphertext + auth_tag)
 ```
 
-Full schema in [`schemas/protocol.md`](schemas/protocol.md) (TODO: write).
+### Token Cost Calculation (Anthropic)
+Input cost: $3.75 / 1M tokens ($0.00000375 per token)
+Output cost: $15.00 / 1M tokens ($0.000015 per token)
+Platform fee: 5% on total
 
-## 8. Deployment
+### Rate Limiting
+- Per-user: 20 chat requests/minute
+- Per-IP: 100 requests/minute (Express `express-rate-limit`)
+- BYOK users: no generation limit (unlimited via their key)
 
-### Local
-```sh
-pnpm install
-pnpm dev           # starts daemon on :7431, next on :3000
+### Middleware Chain for `/api/chat`
+```
+requireAuth → checkPlatformMode → checkUsageLimit → proxyToAnthropic
 ```
 
-### Docker
-```yaml
-# docker-compose.yml
-services:
-  daemon:
-    image: openclaudedesign/daemon
-    volumes: [ "~/.open-design:/root/.open-design", "./:/workspace" ]
-    ports: ["7431:7431"]
-  web:
-    image: openclaudedesign/web
-    ports: ["3000:3000"]
-    environment: [ "OD_DAEMON_URL=ws://daemon:7431" ]
+---
+
+## Frontend Changes (src/)
+
+### `src/components/SettingsDialog.tsx` (existing)
+Add new "Billing" tab:
+- Current plan display
+- API key input (masked) with test connection button
+- Platform mode toggle (BYOK / Zetu)
+- Usage meter (current month)
+
+### `src/components/UsageMeter.tsx` (new)
+Shows: `Used X of Y generations` with progress bar
+
+### `src/state/billing.ts` (new)
+Fetches usage, plan, handles checkout/portal
+
+### `src/providers/auth.ts` (new)
+Wraps Clerk `getToken()` for API calls:
+```ts
+export async function getClerkAuthToken(): Promise<string | null> {
+  const { getToken } = useAuth(); // or window.Clerk
+  return getToken();
+}
 ```
 
-### Vercel + local daemon (Topology B)
-```sh
-vercel deploy                     # web only
-od daemon --expose               # user runs locally; prints tunnel URL
-# user pastes URL into /connect UI
+---
+
+## File Structure (changes)
+
+```
+server.js           # Add billing endpoints, modify /api/chat
+db/init.sql         # Add new tables (run as migration)
+src/
+  state/
+    billing.ts      # NEW: usage, plan, checkout
+  components/
+    UsageMeter.tsx  # NEW
+  providers/
+    auth.ts         # NEW: Clerk token wrapper for API
+app/
+  api/
+    user/
+      me.ts         # NEW Route Handler
+      api-key.ts    # NEW
+      usage.ts      # NEW
+    billing/
+      checkout.ts   # NEW
+      portal.ts     # NEW
+    webhooks/
+      stripe.ts     # Already exists, update
+      clerk.ts      # Already exists, verify
 ```
 
-### Vercel direct (Topology C)
-```sh
-vercel deploy                     # same bundle
-# flip VERCEL env flag OD_MODE=direct to hide daemon-connect UI
+---
+
+## Environment Variables (additions)
+
+```env
+# Encryption (32 bytes, base64 encoded)
+ENCRYPTION_KEY=your-32-byte-base64-key
+
+# Platform Anthropic key (for Zetu mode)
+ANTHROPIC_API_KEY=sk-ant-...
+
+# Stripe
+STRIPE_SECRET_KEY=sk_live_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+STRIPE_STARTER_PRICE_ID=price_...
+STRIPE_PRO_PRICE_ID=price_...
+
+# Rate limiting
+RATE_LIMIT_PER_USER=20
+RATE_LIMIT_PER_IP=100
 ```
-
-## 9. Security model
-
-| Surface | Threat | Mitigation |
-|---|---|---|
-| Daemon WebSocket | Arbitrary local process talks to daemon | Token handshake; token printed on `od daemon` start, required in WS URL |
-| Artifact code in preview | XSS/cookie theft from host | `<iframe sandbox="allow-scripts">`, no `allow-same-origin` |
-| Agent running on user's machine | Agent reads/writes outside project | Adapter sets `cwd` to artifact dir; relies on agent's own permission system (Claude Code's `--allowed-tools` etc.) |
-| User secrets | Leak to cloud | BYOK stored only in daemon's `config.toml` (mode 0600) or browser `localStorage` in Topology C, never sent to OD's own servers (we don't have any) |
-| Skill from untrusted source | Malicious skill in `~/.claude/skills/` | Install-time warning; skills run under the agent's permission model, not ours |
-| Vercel web bundle | Compromised build | Standard Vercel integrity; bundle has zero secrets |
-
-We inherit the agent's permission model on purpose — we don't invent our own sandbox, because Claude Code's `--permission-mode` / Codex's sandboxing / Cursor's containment already exist and are maintained.
-
-## 10. Performance notes
-
-- Daemon startup: < 500 ms (lazy adapter init).
-- Agent detection: < 200 ms (parallel PATH probes).
-- First generation latency: dominated by agent model time; OD overhead should be < 50 ms.
-- Preview reload: debounced 100 ms on artifact file writes.
-- Skill index: cold scan < 100 ms for ~50 skills; watched with `chokidar`.
-
-## 11. What's explicitly out of scope for MVP
-
-- Multi-user / RBAC / orgs
-- Hosted skill marketplace (git URLs only in v1)
-- Figma export (post-1.0, same as [Open CoDesign][ocod])
-- Collaborative editing
-- Mobile web support (desktop only in MVP)
-- Offline mode (beyond "the agent is local" — we don't cache model responses)

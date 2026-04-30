@@ -121,6 +121,7 @@ declare -A TABLE_STMTS=(
   ["platform_usage"]="CREATE TABLE platform_usage ( id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, period TEXT NOT NULL, plan TEXT NOT NULL DEFAULT 'free', generations_used INTEGER NOT NULL DEFAULT 0, tokens_used BIGINT NOT NULL DEFAULT 0, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), UNIQUE(user_id, period) );"
   ["platform_api_keys"]="CREATE TABLE platform_api_keys ( id UUID PRIMARY KEY DEFAULT gen_random_uuid(), name TEXT NOT NULL, provider TEXT NOT NULL, encrypted_key TEXT NOT NULL, is_active BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW() );"
   ["invoices"]="CREATE TABLE invoices ( id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, stripe_invoice_id TEXT UNIQUE, period TEXT NOT NULL, amount_cents BIGINT NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', created_at TIMESTAMPTZ NOT NULL DEFAULT NOW() );"
+  ["templates"]="CREATE TABLE templates ( id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, description TEXT, source_project_id UUID REFERENCES projects(id) ON DELETE SET NULL, files_json JSONB NOT NULL DEFAULT '[]'::jsonb, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW() );"
 )
 
 for tbl in "${!TABLE_STMTS[@]}"; do
@@ -137,6 +138,8 @@ declare -A INDEX_STMTS=(
   ["monthly_usage_user_period_idx"]="CREATE INDEX IF NOT EXISTS monthly_usage_user_period_idx ON monthly_usage(user_id, period DESC);"
   ["platform_usage_user_period_idx"]="CREATE INDEX IF NOT EXISTS platform_usage_user_period_idx ON platform_usage(user_id, period DESC);"
   ["invoices_user_id_idx"]="CREATE INDEX IF NOT EXISTS invoices_user_id_idx ON invoices(user_id);"
+  ["templates_user_id_idx"]="CREATE INDEX IF NOT EXISTS templates_user_id_idx ON templates(user_id);"
+  ["templates_source_project_id_idx"]="CREATE INDEX IF NOT EXISTS templates_source_project_id_idx ON templates(source_project_id);"
 )
 
 for idx in "${!INDEX_STMTS[@]}"; do

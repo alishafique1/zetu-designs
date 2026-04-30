@@ -68,6 +68,20 @@ CREATE INDEX IF NOT EXISTS projects_user_id_idx ON projects(user_id);
 CREATE INDEX IF NOT EXISTS projects_brand_id_idx ON projects(brand_id);
 CREATE INDEX IF NOT EXISTS projects_status_idx ON projects(status);
 
+-- ---- Templates ----
+CREATE TABLE IF NOT EXISTS templates (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          UUID REFERENCES users(id) ON DELETE CASCADE,
+  name             TEXT NOT NULL,
+  description      TEXT,
+  source_project_id UUID REFERENCES projects(id) ON DELETE SET NULL,
+  files_json       JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS templates_user_id_idx ON templates(user_id);
+CREATE INDEX IF NOT EXISTS templates_source_project_id_idx ON templates(source_project_id);
+
 -- ---- Subscriptions ----
 CREATE TABLE IF NOT EXISTS subscriptions (
   id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
