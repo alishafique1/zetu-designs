@@ -27,7 +27,7 @@ let _supabase;
 function getSupabase() {
   if (!_supabase) {
     _supabase = createClient(
-      process.env.DATABASE_URL || 'postgresql://localhost/social_dots_studio',
+      process.env.SUPABASE_URL || process.env.DATABASE_URL || 'https://freuvtwfmclneotbxwff.supabase.co',
       process.env.SUPABASE_SERVICE_KEY || 'anonymous'
     );
   }

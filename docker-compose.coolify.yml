@@ -29,6 +29,8 @@ services:
       PORT: 3000
       # Point at your Postgres (Supabase or existing)
       DATABASE_URL: ${DATABASE_URL}
+      SUPABASE_URL: https://freuvtwfmclneotbxwff.supabase.co
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZyZXV2dHdtY2xuZW90Ynh3ZmYiLCJyb2xlIjoic2VydmljZV9rZXkiLCJpYXQiOjE3MjY4MjU0MDB9.4R0w}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_STARTER_PRICE_ID: ${STRIPE_STARTER_PRICE_ID}
